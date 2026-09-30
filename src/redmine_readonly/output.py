@@ -3,13 +3,13 @@ from __future__ import annotations
 import csv
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import tempfile
-from typing import Any
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from .errors import AppError
 from .exporter import ExportResult
@@ -56,7 +56,7 @@ def _csv_row(issue: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_name() -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return f"run-{timestamp}-{uuid.uuid4().hex}"
 
 
@@ -87,7 +87,7 @@ def write_outputs(result: ExportResult, output_dir: Path) -> tuple[Path, Path]:
         return completed_dir / "issues.csv", completed_dir / "issues.json"
     except AppError:
         raise
-    except Exception as exc:
+    except (OSError, TypeError, ValueError, KeyError, csv.Error) as exc:
         raise AppError(f"cannot publish export run: {type(exc).__name__}") from None
     finally:
         if staging_dir is not None:

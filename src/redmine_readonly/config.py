@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
-from pathlib import Path
 import tomllib
+from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from .errors import AppError
@@ -19,7 +19,7 @@ class Config:
     max_pages: int = 2_000
     ca_bundle: str | None = None
 
-    def validate(self) -> "Config":
+    def validate(self) -> Config:
         if not isinstance(self.base_url, str):
             raise AppError("base_url must be a string")
         for name, value in (

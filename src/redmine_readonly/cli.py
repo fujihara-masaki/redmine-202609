@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from .client import RedmineClient
 from .config import load_config

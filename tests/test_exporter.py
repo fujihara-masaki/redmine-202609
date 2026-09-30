@@ -1,11 +1,10 @@
 import pytest
+from conftest import FakeResponse, FakeSession, issue, page
 
 from redmine_readonly.client import RedmineClient
 from redmine_readonly.config import Config
 from redmine_readonly.errors import AppError
 from redmine_readonly.exporter import fetch_issues
-
-from conftest import FakeResponse, FakeSession, issue, page
 
 
 def client(config, responses):

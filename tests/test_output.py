@@ -1,15 +1,14 @@
 import csv
-from concurrent.futures import ThreadPoolExecutor
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from conftest import issue
 
 from redmine_readonly.errors import AppError
 from redmine_readonly.exporter import ExportResult, select_fields
 from redmine_readonly.output import write_outputs
-
-from conftest import issue
 
 
 def test_csv_and_json_handle_content_types_and_formula(tmp_path: Path):

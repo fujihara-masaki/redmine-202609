@@ -1,10 +1,9 @@
-import requests
 import pytest
+import requests
+from conftest import FakeResponse, FakeSession
 
 from redmine_readonly.client import RedmineClient
 from redmine_readonly.errors import AppError
-
-from conftest import FakeResponse, FakeSession
 
 
 def test_check_returns_only_minimum_and_get_with_security_options(config):
