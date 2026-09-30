@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 import tomllib
 from urllib.parse import urlsplit
@@ -19,7 +20,31 @@ class Config:
     ca_bundle: str | None = None
 
     def validate(self) -> "Config":
-        parsed = urlsplit(self.base_url)
+        if not isinstance(self.base_url, str):
+            raise AppError("base_url must be a string")
+        for name, value in (
+            ("connect_timeout", self.connect_timeout),
+            ("read_timeout", self.read_timeout),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise AppError(f"{name} must be a number")
+            if not math.isfinite(value):
+                raise AppError(f"{name} must be finite")
+        for name, value in (
+            ("page_size", self.page_size),
+            ("max_issues", self.max_issues),
+            ("max_pages", self.max_pages),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise AppError(f"{name} must be an integer")
+        if self.ca_bundle is not None and (
+            not isinstance(self.ca_bundle, str) or not self.ca_bundle.strip()
+        ):
+            raise AppError("ca_bundle must be a non-empty string or omitted")
+        try:
+            parsed = urlsplit(self.base_url)
+        except (TypeError, ValueError):
+            raise AppError("base_url is not a valid URL") from None
         if parsed.scheme != "https" or not parsed.netloc:
             raise AppError("base_url must be an absolute HTTPS URL")
         if parsed.username or parsed.password:

@@ -5,8 +5,11 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import tempfile
 from typing import Any
+import uuid
+from datetime import datetime, timezone
 
 from .errors import AppError
 from .exporter import ExportResult
@@ -52,45 +55,40 @@ def _csv_row(issue: dict[str, Any]) -> dict[str, Any]:
     return {key: csv_safe(value) for key, value in row.items()}
 
 
-def _atomic_write(
-    path: Path,
-    writer: Any,
-    *,
-    encoding: str = "utf-8",
-    newline: str | None = None,
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", encoding=encoding, newline=newline, dir=path.parent, delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            writer(stream)
-        os.replace(temporary, path)
-    except OSError as exc:
-        if temporary:
-            temporary.unlink(missing_ok=True)
-        raise AppError(f"cannot write export file: {type(exc).__name__}") from None
+def _run_name() -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return f"run-{timestamp}-{uuid.uuid4().hex}"
 
 
 def write_outputs(result: ExportResult, output_dir: Path) -> tuple[Path, Path]:
-    csv_path, json_path = output_dir / "issues.csv", output_dir / "issues.json"
+    staging_dir: Path | None = None
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        staging_dir = Path(tempfile.mkdtemp(prefix=".pending-", dir=output_dir))
+        staged_csv = staging_dir / "issues.csv"
+        staged_json = staging_dir / "issues.json"
 
-    def write_csv(stream: Any) -> None:
-        writer = csv.DictWriter(stream, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(_csv_row(issue) for issue in result.issues)
+        with staged_csv.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerows(_csv_row(issue) for issue in result.issues)
+        with staged_json.open("w", encoding="utf-8") as stream:
+            json.dump(
+                {"metadata": result.metadata, "issues": result.issues},
+                stream,
+                ensure_ascii=False,
+                indent=2,
+            )
+            stream.write("\n")
 
-    def write_json(stream: Any) -> None:
-        json.dump(
-            {"metadata": result.metadata, "issues": result.issues},
-            stream,
-            ensure_ascii=False,
-            indent=2,
-        )
-        stream.write("\n")
-
-    _atomic_write(csv_path, write_csv, encoding="utf-8-sig", newline="")
-    _atomic_write(json_path, write_json)
-    return csv_path, json_path
+        completed_dir = output_dir / _run_name()
+        os.rename(staging_dir, completed_dir)
+        staging_dir = None
+        return completed_dir / "issues.csv", completed_dir / "issues.json"
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(f"cannot publish export run: {type(exc).__name__}") from None
+    finally:
+        if staging_dir is not None:
+            shutil.rmtree(staging_dir, ignore_errors=True)
