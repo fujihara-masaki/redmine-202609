@@ -52,3 +52,26 @@ def test_safe_distinct_errors(config, response, message):
 def test_no_api_key_is_rejected(config):
     with pytest.raises(AppError, match="API key"):
         RedmineClient(config, "  ", FakeSession([]))
+
+
+def test_invalid_ca_bundle_os_error_is_sanitized(config):
+    secret_path = "/private/SECRET-CA-PATH/corporate.pem"
+    ca_config = config.__class__(config.base_url, ca_bundle=secret_path)
+    client = RedmineClient(
+        ca_config,
+        "TOP-SECRET",
+        FakeSession(
+            [
+                OSError(
+                    f"Could not find a suitable TLS CA certificate bundle: {secret_path}"
+                )
+            ]
+        ),
+    )
+
+    with pytest.raises(AppError, match="CA bundle could not be accessed") as caught:
+        client.current_user()
+
+    rendered = str(caught.value)
+    assert secret_path not in rendered
+    assert "TOP-SECRET" not in rendered

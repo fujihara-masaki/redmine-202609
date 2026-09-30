@@ -43,6 +43,10 @@ class RedmineClient:
             raise AppError("request timed out") from None
         except requests.RequestException as exc:
             raise AppError(f"request failed: {type(exc).__name__}") from None
+        except OSError:
+            if self.config.ca_bundle is not None:
+                raise AppError("CA bundle could not be accessed or loaded") from None
+            raise AppError("request failed due to a local I/O error") from None
         if 300 <= response.status_code < 400:
             raise AppError(
                 "redirect response refused; verify base_url and proxy settings"

@@ -35,13 +35,15 @@ def fetch_issues(
     conditions: dict[str, Any] = {
         "project_id": project_id,
         "status_id": status_id,
+        # Keep this explicit: omitting it can defer behavior to Redmine's
+        # display_subprojects_issues setting in the target environment.
         "subproject_id": "*" if include_subprojects else "!*",
         "sort": "id:asc",
     }
     if tracker_id is not None:
         conditions["tracker_id"] = tracker_id
 
-    issues: list[dict[str, Any]] = []
+    selected_issues: list[dict[str, Any]] = []
     seen: set[int] = set()
     offset = 0
     expected_total: int | None = None
@@ -71,7 +73,8 @@ def fetch_issues(
             raise AppError(
                 "issue count changed during retrieval; export was not written"
             )
-        if not page and len(issues) < total:
+        page_length = len(page)
+        if not page and len(selected_issues) < total:
             raise AppError("server returned an empty page before retrieval completed")
         for issue in page:
             issue_id = issue.get("id") if isinstance(issue, dict) else None
@@ -80,28 +83,30 @@ def fetch_issues(
             if issue_id in seen:
                 raise AppError("duplicate issue ID detected; export was not written")
             seen.add(issue_id)
-            issues.append(issue)
-            if len(issues) > client.config.max_issues:
+            selected_issues.append(select_fields(issue))
+            if len(selected_issues) > client.config.max_issues:
                 raise AppError("maximum issue count reached before export completed")
-        if len(issues) > total:
+        if page:
+            del issue
+        del page, payload
+        if len(selected_issues) > total:
             raise AppError("server returned more issues than total_count")
-        if len(issues) == total:
+        if len(selected_issues) == total:
             break
-        if not page:
+        if page_length == 0:
             raise AppError("pagination did not progress")
-        next_offset = offset + len(page)
+        next_offset = offset + page_length
         if next_offset <= offset:
             raise AppError("pagination did not progress")
         offset = next_offset
 
-    selected = [select_fields(issue) for issue in issues]
     return ExportResult(
-        selected,
+        selected_issues,
         {
             "started_at": started_at,
             "completed_at": _utc_now(),
             "conditions": conditions,
-            "issue_count": len(selected),
+            "issue_count": len(selected_issues),
             "pages": pages,
             "snapshot_note": "Count consistency was checked, but concurrent updates may prevent a transactional snapshot.",
         },

@@ -38,6 +38,32 @@ def test_multiple_pages_and_server_page_size_cap(config):
     }
 
 
+def test_full_issue_fields_are_discarded_during_page_processing(config):
+    full_issue = issue(1)
+    full_issue.update(
+        {
+            "description": "large unnecessary description" * 100,
+            "custom_fields": [{"id": 99, "value": "not selected"}],
+            "journals": [{"id": 123, "notes": "not selected"}],
+        }
+    )
+
+    result = fetch_issues(client(config, [page([full_issue], 1)]), "p")
+
+    assert result.issues == [
+        {
+            "id": 1,
+            "subject": "Issue 1",
+            "project": {"id": 10, "name": "試験"},
+            "tracker": {"id": 2, "name": "障害"},
+            "status": {"id": 1, "name": "New"},
+            "assigned_to": {"id": 7, "name": "担当者"},
+            "created_on": "2026-01-01T00:00:00Z",
+            "updated_on": "2026-01-02T00:00:00Z",
+        }
+    ]
+
+
 def test_default_excludes_subprojects_and_includes_all_statuses(config):
     api = client(config, [page([], 0)])
     fetch_issues(api, "p")

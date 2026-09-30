@@ -39,3 +39,26 @@ def test_invalid_config_type_is_reported_without_traceback(
     assert "connect_timeout must be a number" in captured.err
     assert "Traceback" not in captured.err
     assert "TEST-ONLY-KEY" not in captured.err
+
+
+def test_ca_bundle_os_error_is_reported_without_traceback(
+    tmp_path: Path, monkeypatch, capsys
+):
+    secret_path = "/private/SECRET-CA-PATH/corporate.pem"
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f'base_url="https://redmine.example.invalid"\nca_bundle="{secret_path}"\n'
+    )
+    monkeypatch.setenv("REDMINE_API_KEY", "TEST-ONLY-KEY")
+
+    def fail_get(*args, **kwargs):
+        raise OSError(f"invalid CA path: {secret_path}")
+
+    monkeypatch.setattr("requests.Session.get", fail_get)
+
+    assert run(["--config", str(config), "check"]) == 2
+    captured = capsys.readouterr()
+    assert "CA bundle could not be accessed or loaded" in captured.err
+    assert "Traceback" not in captured.err
+    assert secret_path not in captured.err
+    assert "TEST-ONLY-KEY" not in captured.err
