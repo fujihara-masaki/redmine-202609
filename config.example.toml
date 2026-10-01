@@ -1,0 +1,9 @@
+# Copy to config.toml (ignored by Git) and edit only non-secret settings.
+# Never put an API key in this file. Set REDMINE_API_KEY or use the prompt.
+base_url = "https://redmine.example.invalid/redmine"
+connect_timeout = 5.0
+read_timeout = 30.0
+page_size = 100
+max_issues = 100000
+max_pages = 2000
+# ca_bundle = "C:/approved/path/corporate-ca.pem"
