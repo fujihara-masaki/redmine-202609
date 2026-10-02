@@ -28,6 +28,7 @@ CSV_COLUMNS = [
     "created_on",
     "updated_on",
 ]
+JST_CSV_COLUMNS = ["created_on_jst", "updated_on_jst"]
 FORMULA_PREFIX = re.compile(r"^[\t\r\n ]*[=+\-@]")
 
 
@@ -37,7 +38,7 @@ def csv_safe(value: Any) -> Any:
     return value
 
 
-def _csv_row(issue: dict[str, Any]) -> dict[str, Any]:
+def _csv_row(issue: dict[str, Any], include_jst_columns: bool) -> dict[str, Any]:
     row = {
         "id": issue["id"],
         "subject": issue["subject"],
@@ -52,6 +53,11 @@ def _csv_row(issue: dict[str, Any]) -> dict[str, Any]:
         "created_on": issue["created_on"],
         "updated_on": issue["updated_on"],
     }
+    if include_jst_columns:
+        row.update(
+            created_on_jst=issue.get("created_on_jst"),
+            updated_on_jst=issue.get("updated_on_jst"),
+        )
     return {key: csv_safe(value) for key, value in row.items()}
 
 
@@ -68,10 +74,20 @@ def write_outputs(result: ExportResult, output_dir: Path) -> tuple[Path, Path]:
         staged_csv = staging_dir / "issues.csv"
         staged_json = staging_dir / "issues.json"
 
+        include_jst_columns = (
+            any(
+                "created_on_jst" in issue or "updated_on_jst" in issue
+                for issue in result.issues
+            )
+            or result.metadata.get("include_jst_columns") is True
+        )
+        columns = CSV_COLUMNS + (JST_CSV_COLUMNS if include_jst_columns else [])
         with staged_csv.open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=CSV_COLUMNS)
+            writer = csv.DictWriter(stream, fieldnames=columns)
             writer.writeheader()
-            writer.writerows(_csv_row(issue) for issue in result.issues)
+            writer.writerows(
+                _csv_row(issue, include_jst_columns) for issue in result.issues
+            )
         with staged_json.open("w", encoding="utf-8") as stream:
             json.dump(
                 {"metadata": result.metadata, "issues": result.issues},

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from .client import RedmineClient
@@ -24,6 +24,7 @@ def fetch_issues(
     tracker_id: int | None = None,
     include_subprojects: bool = False,
     status_id: str = "*",
+    include_jst_columns: bool = False,
 ) -> ExportResult:
     if not project_id.strip():
         raise AppError("project must not be empty")
@@ -83,7 +84,7 @@ def fetch_issues(
             if issue_id in seen:
                 raise AppError("duplicate issue ID detected; export was not written")
             seen.add(issue_id)
-            selected_issues.append(select_fields(issue))
+            selected_issues.append(select_fields(issue, include_jst_columns))
             if len(selected_issues) > client.config.max_issues:
                 raise AppError("maximum issue count reached before export completed")
         if page:
@@ -100,17 +101,17 @@ def fetch_issues(
             raise AppError("pagination did not progress")
         offset = next_offset
 
-    return ExportResult(
-        selected_issues,
-        {
-            "started_at": started_at,
-            "completed_at": _utc_now(),
-            "conditions": conditions,
-            "issue_count": len(selected_issues),
-            "pages": pages,
-            "snapshot_note": "Count consistency was checked, but concurrent updates may prevent a transactional snapshot.",
-        },
-    )
+    metadata: dict[str, Any] = {
+        "started_at": started_at,
+        "completed_at": _utc_now(),
+        "conditions": conditions,
+        "issue_count": len(selected_issues),
+        "pages": pages,
+        "snapshot_note": "Count consistency was checked, but concurrent updates may prevent a transactional snapshot.",
+    }
+    if include_jst_columns:
+        metadata["include_jst_columns"] = True
+    return ExportResult(selected_issues, metadata)
 
 
 def _reference(value: Any) -> dict[str, Any]:
@@ -119,8 +120,28 @@ def _reference(value: Any) -> dict[str, Any]:
     return {"id": value.get("id"), "name": value.get("name")}
 
 
-def select_fields(issue: dict[str, Any]) -> dict[str, Any]:
-    return {
+JST = timezone(timedelta(hours=9))
+
+
+def to_jst(value: Any) -> str | None:
+    """Convert an aware ISO 8601 API timestamp to a stable JST display value."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise AppError("issue timestamp has an unexpected type")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise AppError("issue timestamp is not valid ISO 8601") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise AppError("issue timestamp must include a UTC offset")
+    return parsed.astimezone(JST).strftime("%Y-%m-%d %H:%M:%S +09:00")
+
+
+def select_fields(
+    issue: dict[str, Any], include_jst_columns: bool = False
+) -> dict[str, Any]:
+    selected = {
         "id": issue.get("id"),
         "subject": issue.get("subject"),
         "project": _reference(issue.get("project")),
@@ -130,3 +151,7 @@ def select_fields(issue: dict[str, Any]) -> dict[str, Any]:
         "created_on": issue.get("created_on"),
         "updated_on": issue.get("updated_on"),
     }
+    if include_jst_columns:
+        selected["created_on_jst"] = to_jst(selected["created_on"])
+        selected["updated_on_jst"] = to_jst(selected["updated_on"])
+    return selected

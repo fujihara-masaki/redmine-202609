@@ -75,3 +75,66 @@ def test_invalid_ca_bundle_os_error_is_sanitized(config):
     rendered = str(caught.value)
     assert secret_path not in rendered
     assert "TOP-SECRET" not in rendered
+
+
+@pytest.mark.parametrize("reference", ["sample-project", "42"])
+def test_project_resolution_is_minimal_encoded_get(config, reference):
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "project": {
+                        "id": 42,
+                        "identifier": "sample-project",
+                        "name": "Example Project",
+                        "description": "discard this",
+                    }
+                }
+            )
+        ]
+    )
+    client = RedmineClient(config, "TEST-ONLY-KEY", session)
+
+    assert client.project(reference) == {
+        "id": 42,
+        "identifier": "sample-project",
+        "name": "Example Project",
+    }
+    method, url, _ = session.calls[0]
+    assert method == "GET"
+    assert url.endswith(f"/projects/{reference}.json")
+
+
+def test_project_resolution_404_is_safe(config):
+    client = RedmineClient(config, "TOP-SECRET", FakeSession([FakeResponse(404, {})]))
+    with pytest.raises(AppError, match="not found") as caught:
+        client.project("missing-project")
+    assert "TOP-SECRET" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"project": []},
+        {"project": {"id": "42", "identifier": "p", "name": "Project"}},
+        {"project": {"id": 42, "identifier": None, "name": "Project"}},
+    ],
+)
+def test_project_resolution_rejects_malformed_structure(config, payload):
+    client = RedmineClient(
+        config, "TEST-ONLY-KEY", FakeSession([FakeResponse(payload=payload)])
+    )
+    with pytest.raises(AppError, match="unexpected structure"):
+        client.project("sample-project")
+
+
+@pytest.mark.parametrize(
+    "reference", ["../issues", "project/name", "project?x=1", "Project Name", ""]
+)
+def test_project_resolution_rejects_path_injection_before_request(config, reference):
+    session = FakeSession([])
+    client = RedmineClient(config, "TEST-ONLY-KEY", session)
+    with pytest.raises(AppError, match="project"):
+        client.project(reference)
+    assert session.calls == []

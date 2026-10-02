@@ -92,3 +92,26 @@ def test_existing_legacy_outputs_are_not_overwritten(tmp_path: Path):
     assert old_json.read_text() == "old json"
     assert csv_path.parent == json_path.parent
     assert csv_path.parent != tmp_path
+
+
+def test_jst_columns_are_added_to_csv_and_json_only_when_requested(tmp_path: Path):
+    selected = select_fields(issue(1), include_jst_columns=True)
+    result = ExportResult([selected], {"issue_count": 1, "include_jst_columns": True})
+
+    csv_path, json_path = write_outputs(result, tmp_path)
+
+    with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+        row = next(csv.DictReader(stream))
+    assert row["created_on"] == "2026-01-01T00:00:00Z"
+    assert row["created_on_jst"] == "2026-01-01 09:00:00 +09:00"
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["issues"][0]["updated_on"] == "2026-01-02T00:00:00Z"
+    assert payload["issues"][0]["updated_on_jst"] == "2026-01-02 09:00:00 +09:00"
+
+
+def test_empty_jst_export_still_has_optional_csv_columns(tmp_path: Path):
+    result = ExportResult([], {"issue_count": 0, "include_jst_columns": True})
+    csv_path, _ = write_outputs(result, tmp_path)
+    with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+        columns = next(csv.reader(stream))
+    assert columns[-2:] == ["created_on_jst", "updated_on_jst"]

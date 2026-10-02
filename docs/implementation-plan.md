@@ -4,7 +4,7 @@
 
 publicリポジトリを前提に秘密・実データを残さず、変更操作は読み取りから段階的に分離します。各段階で対象Redmineのバージョン、独自改修、API、権限、カスタム項目を実機検証し、その結果が承認されるまで次段階を本番利用しません。APIキーの権限はツールでは制限できません。
 
-## PR-1: 基盤・読み取り専用出力（今回）
+## PR-1: 基盤・読み取り専用出力
 
 - Python CLI、厳格なURL/TOML検証、環境変数または非表示入力によるキー取得
 - GET限定クライアント、認証check、プロジェクト必須のexport
@@ -13,6 +13,17 @@ publicリポジトリを前提に秘密・実データを残さず、変更操�
 - HTTPをモックした異常系・機密非表示・出力テスト、Windows/CA/proxy/実機確認文書
 
 受入条件は、全自動テスト通過、GET以外が存在しないこと、未完取得が出力されないこと、チェックリストの確認結果が「未実施」と明記されることです。
+
+## PR-1.1: 実機確認結果と読み取り専用UX（今回）
+
+- Windows 11での初回導入、PC再起動/新規PowerShell後の再開、実機照合runbook
+- 固定GET endpointによるproject identifier/数値IDの安全なresolution
+- APIの `created_on` / `updated_on` raw値を保持した、明示opt-inのJST表示列
+- basic schemaを維持しながら標準追加項目、本文、custom field、個別issue情報を許可リストで段階導入する設計
+
+許可するHTTP操作は `GET /users/current.json`、`GET /issues.json`、
+`GET /projects/{id_or_identifier}.json` だけです。変更候補生成、変更系API、個別issue endpointは
+追加せず、PR-2の計画も変更しません。
 
 ## PR-2: 変更候補の作成（計画のみ）
 
