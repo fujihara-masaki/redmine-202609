@@ -229,17 +229,49 @@ $data = Get-Content "$run\issues.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 既存venvを作り直さず、接続確認済み `config.toml` をひな型で上書きしない。
 
 ```powershell
-Set-Location <repositoryのローカルパス>
+# 例示値。実際のrepositoryのローカルパスへ置き換える。
+$repo = "C:\ApprovedTools\redmine-readonly"
+Set-Location -LiteralPath $repo -ErrorAction Stop
+$worktree = @(git status --porcelain)
+if ($LASTEXITCODE -ne 0) { throw "git status failed; stop before update" }
 git status --short --branch
-if (git status --porcelain) { throw "uncommitted changes: stop before update" }
+if ($LASTEXITCODE -ne 0) { throw "git status failed; stop before update" }
+if ($worktree.Count -ne 0) { throw "uncommitted changes: stop before update" }
 git switch main
+if ($LASTEXITCODE -ne 0) { throw "git switch main failed; stop before update" }
 git pull --ff-only
+if ($LASTEXITCODE -ne 0) { throw "git pull --ff-only failed; do not test or access QUICK2" }
 git status --short --branch
-# pyproject.toml等が更新され、必要な場合だけ依存を更新する。
-.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+if ($LASTEXITCODE -ne 0) { throw "git status after update failed; stop" }
+$updatedBranch = git branch --show-current
+if ($LASTEXITCODE -ne 0) { throw "could not record updated branch; stop" }
+$updatedHead = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw "could not record updated HEAD; stop" }
+"Updated branch: $updatedBranch"
+"Updated HEAD: $updatedHead"
+
+# 更新内容を確認し、pyproject.toml等の依存定義が変わった場合だけtrueにする。
+$updateDependencies = $false
+if ($updateDependencies) {
+  .\.venv\Scripts\python.exe -m pip install -e ".[test]"
+  if ($LASTEXITCODE -ne 0) { throw "dependency update failed; do not access QUICK2" }
+}
+
+# pip installの要否にかかわらず、既存venvで以下をすべて実行する。
 .\.venv\Scripts\python.exe -m pytest
 if ($LASTEXITCODE -ne 0) { throw "local tests failed; do not access QUICK2" }
+.\.venv\Scripts\ruff.exe check .
+if ($LASTEXITCODE -ne 0) { throw "Ruff check failed; do not access QUICK2" }
+.\.venv\Scripts\ruff.exe format --check .
+if ($LASTEXITCODE -ne 0) { throw "Ruff format check failed; do not access QUICK2" }
+.\.venv\Scripts\python.exe -m compileall -q src tests
+if ($LASTEXITCODE -ne 0) { throw "compileall failed; do not access QUICK2" }
 ```
+
+上のpip installは常時実行する指示ではない。更新前後の依存定義を確認し、依存更新が必要な場合だけ
+実行するコマンド例である。不要ならその2行を飛ばし、既存venvをそのまま使う。どのnative commandも
+直後の `$LASTEXITCODE` を確認し、失敗を後続commandの成功で上書きしない。いずれかが失敗した場合は
+そこで停止し、接続確認やexportへ進まない。接続確認済み `config.toml` はコピー・再作成しない。
 
 次は完全な架空値である。`Read-Host "..."` の引用文字列はprompt表示であって値ではないため、ここでは
 誤認しにくい直接代入を示す。実行前に承認済み数値project IDとrepository外の保存先へ置き換え、
