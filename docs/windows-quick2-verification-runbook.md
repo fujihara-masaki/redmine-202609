@@ -102,17 +102,33 @@ issues filterに渡す `project_id` は、対象環境の確認では数値IDを
 
 ```powershell
 $out = "<repository外の承認済み出力先>"
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+$beforeRuns = @(
+  Get-ChildItem $out -Directory -Filter "run-*" |
+    Select-Object -ExpandProperty FullName
+)
 .\.venv\Scripts\redmine-readonly.exe --config config.toml export `
   --project <確認済み数値ID> --output-dir $out
-$run = (Get-ChildItem $out -Directory -Filter "run-*" |
-  Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+if ($LASTEXITCODE -ne 0) {
+  throw "export failed; do not inspect an older run"
+}
+$afterRuns = @(
+  Get-ChildItem $out -Directory -Filter "run-*" |
+    Select-Object -ExpandProperty FullName
+)
+$newRuns = @($afterRuns | Where-Object { $_ -notin $beforeRuns })
+if ($newRuns.Count -ne 1) {
+  throw "could not uniquely identify the run created by this export"
+}
+$run = $newRuns[0]
 $data = Get-Content "$run\issues.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 $data.metadata | Format-List
 Get-Item "$run\issues.csv", "$run\issues.json"
 ```
 
 APIアクセスの成功、CSV/JSON両方の生成、`issue_count`、`pages`、`conditions` を確認する。
-BOMなしUTF-8 JSONは必ず `Get-Content -Encoding UTF8` で読む。
+BOMなしUTF-8 JSONは必ず `Get-Content -Encoding UTF8` で読む。exportが失敗した場合は停止し、
+過去のrunを今回の結果として検証してはならない。前後のrun一覧の差分が一意でない場合も停止する。
 
 ## 6. 子project確認
 
@@ -124,8 +140,25 @@ GUIの親project画面が子projectのissueも表示していると、既定CLI�
 次を試す。
 
 ```powershell
+$beforeRuns = @(
+  Get-ChildItem $out -Directory -Filter "run-*" |
+    Select-Object -ExpandProperty FullName
+)
 .\.venv\Scripts\redmine-readonly.exe --config config.toml export `
   --project <確認済み数値ID> --include-subprojects --output-dir $out
+if ($LASTEXITCODE -ne 0) {
+  throw "export failed; do not inspect an older run"
+}
+$afterRuns = @(
+  Get-ChildItem $out -Directory -Filter "run-*" |
+    Select-Object -ExpandProperty FullName
+)
+$newRuns = @($afterRuns | Where-Object { $_ -notin $beforeRuns })
+if ($newRuns.Count -ne 1) {
+  throw "could not uniquely identify the run created by this export"
+}
+$run = $newRuns[0]
+$data = Get-Content "$run\issues.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 ```
 
 親・子合計、project別件数、複数ページ時の `pages` をGUIと照合する。GUIの絞り込み条件と
@@ -167,8 +200,25 @@ CLIで比較用列が必要な場合だけ `--include-jst-columns` を付ける�
 CSVへ `created_on_jst` / `updated_on_jst` (`YYYY-MM-DD HH:MM:SS +09:00`) を追加する。
 
 ```powershell
+$beforeRuns = @(
+  Get-ChildItem $out -Directory -Filter "run-*" |
+    Select-Object -ExpandProperty FullName
+)
 .\.venv\Scripts\redmine-readonly.exe --config config.toml export `
   --project <確認済み数値ID> --include-jst-columns --output-dir $out
+if ($LASTEXITCODE -ne 0) {
+  throw "export failed; do not inspect an older run"
+}
+$afterRuns = @(
+  Get-ChildItem $out -Directory -Filter "run-*" |
+    Select-Object -ExpandProperty FullName
+)
+$newRuns = @($afterRuns | Where-Object { $_ -notin $beforeRuns })
+if ($newRuns.Count -ne 1) {
+  throw "could not uniquely identify the run created by this export"
+}
+$run = $newRuns[0]
+$data = Get-Content "$run\issues.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 ```
 
 ## 9. 終了・情報管理

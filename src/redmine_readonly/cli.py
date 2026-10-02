@@ -31,7 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export = commands.add_parser("export", help="export issues as CSV and JSON")
     export.add_argument(
-        "--project", required=True, help="explicit project ID or identifier"
+        "--project",
+        required=True,
+        help=(
+            "project ID; use the verified numeric ID for QUICK2 "
+            "(resolve identifiers with resolve-project)"
+        ),
     )
     export.add_argument(
         "--status",

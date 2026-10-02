@@ -22,13 +22,15 @@ ExecutionPolicy変更を不要にするため、runbookではvenvをactivateせ�
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
 Copy-Item config.example.toml config.toml
-$env:REDMINE_API_KEY = Read-Host "API key" -MaskInput
-redmine-readonly --config config.toml check
-redmine-readonly --config config.toml export --project sample-project --output-dir "D:\Approved\RedmineExports"
-Remove-Item Env:REDMINE_API_KEY
+.\.venv\Scripts\redmine-readonly.exe --config config.toml check
+.\.venv\Scripts\redmine-readonly.exe --config config.toml resolve-project `
+  --project sample-project
+# numeric_project_id: <確認した数値ID>
+.\.venv\Scripts\redmine-readonly.exe --config config.toml export `
+  --project <確認した数値ID> `
+  --output-dir "D:\Approved\RedmineExports"
 ```
 
 出力先はリポジトリ外の、組織に承認されたアクセス制御・保管期限・バックアップ方針を持つフォルダを指定します。共有端末や同期対象フォルダを安易に使わないでください。
@@ -54,6 +56,10 @@ $env:NO_PROXY = "localhost,127.0.0.1"
 ```powershell
 .\.venv\Scripts\redmine-readonly.exe --config config.toml resolve-project --project sample-project
 ```
+
+対象QUICK2の実機確認では、identifierをissues filterへ渡した場合と数値IDを渡した場合で
+結果が異なったため、`resolve-project` で確認した数値IDを `export --project` に指定します。
+これは対象環境での確認結果であり、すべてのRedmine環境に共通する挙動とは断定しません。
 
 `export` の `--project` と `--output-dir` は必須です。既定条件は全ステータス (`--status '*'` / `status_id=*`、完了を含む)、子プロジェクト除外 (`subproject_id=!*`)、ID昇順です。対象環境で確認済みのステータスID等に限定する場合は `--status`、子プロジェクトを含めるには `--include-subprojects`、トラッカー絞り込みには数値IDの `--tracker` を明示します。
 
