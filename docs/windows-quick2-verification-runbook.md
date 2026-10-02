@@ -84,8 +84,10 @@ $data.metadata
 
 ## 4. project確認
 
-issues filterに渡す `project_id` は、対象環境の確認では数値IDを使う必要があった。この挙動を
-全Redmineに断定せず、まず専用のGETだけを使うコマンドでidentifierと数値IDの対応を確認する。
+本手順では対象projectの取り違えを避けるため、まず専用のGETだけを使うコマンドでidentifierと
+数値IDの対応を確認し、exportには確認済みの数値IDを使用する。実機確認では、親projectのみの
+取得と子projectを含む取得で件数が異なることを確認した。identifier指定の可否は、この確認結果
+だけでは判断しておらず、すべてのRedmine環境に共通する挙動とも断定しない。
 
 ```powershell
 .\.venv\Scripts\redmine-readonly.exe --config config.toml resolve-project --project <承認済みidentifier>

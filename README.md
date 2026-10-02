@@ -57,9 +57,10 @@ $env:NO_PROXY = "localhost,127.0.0.1"
 .\.venv\Scripts\redmine-readonly.exe --config config.toml resolve-project --project sample-project
 ```
 
-対象QUICK2の実機確認では、identifierをissues filterへ渡した場合と数値IDを渡した場合で
-結果が異なったため、`resolve-project` で確認した数値IDを `export --project` に指定します。
-これは対象環境での確認結果であり、すべてのRedmine環境に共通する挙動とは断定しません。
+本手順では対象projectの取り違えを避けるため、`resolve-project` でidentifierと数値IDの対応を
+確認し、その数値IDを `export --project` に指定します。実機確認では、親projectのみの取得と
+子projectを含む取得で件数が異なることを確認しました。identifier指定の可否は、この確認結果
+だけでは判断しておらず、すべてのRedmine環境に共通する挙動とも断定しません。
 
 `export` の `--project` と `--output-dir` は必須です。既定条件は全ステータス (`--status '*'` / `status_id=*`、完了を含む)、子プロジェクト除外 (`subproject_id=!*`)、ID昇順です。対象環境で確認済みのステータスID等に限定する場合は `--status`、子プロジェクトを含めるには `--include-subprojects`、トラッカー絞り込みには数値IDの `--tracker` を明示します。
 
@@ -76,7 +77,7 @@ basic schemaは従来どおりです。
 
 ## 標準仕様と実環境確認
 
-標準Redmine REST APIで一般に提供される上記2エンドポイントと、issuesのフィルター・ページングを前提にしています。一方、対象環境のバージョンや改修により、利用可否、フィルター構文、上限、返却項目、権限挙動が異なる可能性があります。`docs/quick2-verification-checklist.md` に従い確認してください。
+標準Redmine REST APIのうち、「安全上の境界」に列挙した3種類のGETエンドポイントと、issuesのフィルター・ページングを前提にしています。一方、対象環境のバージョンや改修により、利用可否、フィルター構文、上限、返却項目、権限挙動が異なる可能性があります。`docs/quick2-verification-checklist.md` に従い確認してください。
 
 カスタム項目を含む追加fieldは現在設計段階であり、今回保存しません。管理者と項目の必要性を合意し、対象環境が公開する仕様と安全な検証から項目ID、名称、型、複数値、権限による可視性を確認してください。実データをリポジトリへ貼らず、必要性判明後に許可リスト方式で追加します。段階案は [export項目の拡張設計](docs/export-field-expansion-design.md) を参照してください。
 
