@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import FakeResponse, FakeSession
+
 from redmine_readonly.cli import run
 
 
@@ -62,3 +64,45 @@ def test_ca_bundle_os_error_is_reported_without_traceback(
     assert "Traceback" not in captured.err
     assert secret_path not in captured.err
     assert "TEST-ONLY-KEY" not in captured.err
+
+
+def test_resolve_project_prints_only_minimum_fields(
+    tmp_path: Path, monkeypatch, capsys
+):
+    config = tmp_path / "config.toml"
+    config.write_text('base_url="https://redmine.example.invalid"\n')
+    monkeypatch.setenv("REDMINE_API_KEY", "TEST-ONLY-KEY")
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "project": {
+                        "id": 42,
+                        "identifier": "sample-project",
+                        "name": "Example Project",
+                        "description": "must not be shown",
+                    }
+                }
+            )
+        ]
+    )
+    monkeypatch.setattr("requests.Session", lambda: session)
+
+    assert (
+        run(
+            [
+                "--config",
+                str(config),
+                "resolve-project",
+                "--project",
+                "sample-project",
+            ]
+        )
+        == 0
+    )
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "numeric_project_id: 42\nidentifier: sample-project\nname: Example Project\n"
+    )
+    assert "must not be shown" not in captured.out
+    assert {call[0] for call in session.calls} == {"GET"}

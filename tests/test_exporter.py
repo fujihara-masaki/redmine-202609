@@ -4,7 +4,7 @@ from conftest import FakeResponse, FakeSession, issue, page
 from redmine_readonly.client import RedmineClient
 from redmine_readonly.config import Config
 from redmine_readonly.errors import AppError
-from redmine_readonly.exporter import fetch_issues
+from redmine_readonly.exporter import fetch_issues, select_fields, to_jst
 
 
 def client(config, responses):
@@ -116,3 +116,49 @@ def test_only_get_is_used(config):
     api = client(config, [page([], 0)])
     fetch_issues(api, "p")
     assert {call[0] for call in api._session.calls} == {"GET"}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-01-01T00:00:00Z", "2026-01-01 09:00:00 +09:00"),
+        ("2026-01-01T18:30:00+00:00", "2026-01-02 03:30:00 +09:00"),
+        ("2026-01-01T12:00:00-05:00", "2026-01-02 02:00:00 +09:00"),
+        (None, None),
+    ],
+)
+def test_to_jst_handles_iso_offsets_and_none(raw, expected):
+    assert to_jst(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["not-a-date", "2026-01-01T00:00:00", 123])
+def test_to_jst_rejects_invalid_or_ambiguous_values(raw):
+    with pytest.raises(AppError, match="timestamp"):
+        to_jst(raw)
+
+
+def test_jst_columns_are_opt_in_and_raw_values_are_unchanged():
+    raw_issue = issue(1)
+    original_created = raw_issue["created_on"]
+    original_updated = raw_issue["updated_on"]
+
+    basic = select_fields(raw_issue)
+    with_jst = select_fields(raw_issue, include_jst_columns=True)
+
+    assert list(basic) == [
+        "id",
+        "subject",
+        "project",
+        "tracker",
+        "status",
+        "assigned_to",
+        "created_on",
+        "updated_on",
+    ]
+    assert "created_on_jst" not in basic
+    assert with_jst["created_on"] == original_created
+    assert with_jst["updated_on"] == original_updated
+    assert with_jst["created_on_jst"] == "2026-01-01 09:00:00 +09:00"
+    assert with_jst["updated_on_jst"] == "2026-01-02 09:00:00 +09:00"
+    assert raw_issue["created_on"] == original_created
+    assert raw_issue["updated_on"] == original_updated

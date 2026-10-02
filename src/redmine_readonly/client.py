@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
 from .config import Config
 from .errors import AppError
 
+PROJECT_REFERENCE = re.compile(r"(?:[1-9][0-9]*|[a-z0-9][a-z0-9_-]*)\Z")
+
 
 class RedmineClient:
-    """Client exposing only the two GET endpoints required by this tool."""
+    """Client exposing only the explicitly supported read-only GET endpoints."""
 
     def __init__(
         self, config: Config, api_key: str, session: requests.Session | None = None
@@ -80,3 +84,24 @@ class RedmineClient:
 
     def issue_page(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._get_json("/issues.json", params)
+
+    def project(self, project_reference: str) -> dict[str, Any]:
+        """Resolve one numeric ID or Redmine identifier to minimal project data."""
+        if not PROJECT_REFERENCE.fullmatch(project_reference):
+            raise AppError("project must be a numeric ID or valid identifier")
+        encoded_reference = quote(project_reference, safe="")
+        payload = self._get_json(f"/projects/{encoded_reference}.json")
+        project = payload.get("project")
+        if (
+            not isinstance(project, dict)
+            or not isinstance(project.get("id"), int)
+            or isinstance(project.get("id"), bool)
+            or not isinstance(project.get("identifier"), str)
+            or not isinstance(project.get("name"), str)
+        ):
+            raise AppError("project response has an unexpected structure")
+        return {
+            "id": project["id"],
+            "identifier": project["identifier"],
+            "name": project["name"],
+        }
