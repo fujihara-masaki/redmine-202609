@@ -1,74 +1,62 @@
 # export項目の段階的拡張設計
 
-## 目的と前提
+## PR-1.2の境界
 
-現在のJSONに選択するbasic項目は `id`, `subject`, `project`, `tracker`, `status`,
-`assigned_to`, `created_on`, `updated_on` である。CSVは参照項目をID/name列へ展開する。
-本設計は、それ以外のQUICK2/Redmineデータを、データ最小化、後方互換性、読み取り専用境界を
-保って段階的に追加するための案であり、このPRでは追加項目を実装しない。
+既定 `basic` は従来の8 JSON項目・12 CSV列を変えない。明示 `--fields extended` のみ、一覧
+`GET /issues.json` の同じ応答から次の固定10項目を積極選択する。profileはAPI parameterではなく、
+個別issue GET、追加include、参照先取得は行わない。完全なissue objectは保持せず、未知の親子キー、
+description、custom_fields、journals、watchers、attachments、relationsを保存しない。
 
-標準Redmineの一般的なREST API仕様を候補発見の出発点とするが、対象QUICK2のバージョン、
-独自改修、権限、設定、実レスポンスでの存在や型は未確認である。候補を「必ず存在する項目」と
-扱わず、秘密を含まない検証記録と管理者承認を経て許可リストへ加える。
+| field | 非null値の許可shape |
+| --- | --- |
+| priority / author / category / fixed_version | 正の整数id、返却時だけstring/null name |
+| parent | 正の整数idだけ |
+| start_date / due_date | 実在する `YYYY-MM-DD` または空文字 |
+| done_ratio | boolでない0..100の整数 |
+| estimated_hours | boolでない0以上の有限JSON数値（丸めない） |
+| is_private | JSON boolean |
 
-## A. `/issues.json` 一覧レスポンスで得られる可能性がある標準項目
+参照nameは最大4096文字で、超過値を切り捨てない。型・値異常はfield名と固定理由だけのAppErrorで
+停止し、元値やissue IDをエラーへ含めない。この検証はextendedだけに適用しbasicを変えない。
+authorは個人識別情報となり得て、category/version nameも業務情報になり得るため、extendedは
+対象範囲と保存を承認した利用者だけが選ぶopt-inである。
 
-一般的なRedmineの候補を次のように分類し、対象環境の架空/検証用projectで一覧レスポンスを
-確認してから採用する。
+## 欠損、null、出力
 
-| 分類 | 候補 | 想定する表現と確認点 |
-| --- | --- | --- |
-| 参照 | `priority`, `author`, `category`, `fixed_version`, `parent` | ID/name等のshape、未設定時の省略/null、権限による差 |
-| 日付 | `start_date`, `due_date` | 日付だけか日時か、未設定値。JST日時変換の対象にしない |
-| 進捗・工数 | `done_ratio`, `estimated_hours` | 数値型、null、小数、権限、業務上の機密区分 |
-| フラグ | `is_private` | boolean型、private issue自体の可視権限 |
+元応答にキーがなければJSONキーを作らず、キーがありnullならnullを残し、非null値は検証後に
+元のJSON型で残す。false、0、0.0、日付空文字を欠損にしない。欠損理由を権限、未設定、対象環境の
+非対応等と推測せず、別APIから補完しない。
 
-採用時は項目ごとに必要性、型、最大サイズ、欠損時表現、CSV式対策、JSON型保持、権限別結果を
-テストする。実レスポンスをfixtureにコピーせず、完全な架空データを作る。
+CSVはbasic 12列、basic+JST 14列を維持する。extendedはその後へ次を固定順で加え、0件・全欠損でも
+26列（JST併用28列）を出す。
 
-## B. `description` など本文系
+`priority_id, priority_name, author_id, author_name, category_id, category_name, fixed_version_id,
+fixed_version_name, parent_id, start_date, due_date, done_ratio, estimated_hours, is_private`
 
-本文は大容量かつ個人情報、障害詳細、ログ、秘密情報を含む可能性が高い。basicへ無条件に
-追加しない。必要性、閲覧者、保存先、保持期限、マスキング可否、最大サイズを別レビューし、
-明示opt-inの専用profileまたは本文専用exportとする。コンソール、エラー、metadataへ本文を
-出さない。CSVセルの改行・式注入対策だけでは情報管理上十分ではない。
+CSVの文字列には共通 `csv_safe` を使い、booleanは小文字true/falseとする。CSVでは欠損/null/空文字が
+空欄へ収束するため、区別にはJSONを使う。created/updated raw日時と任意JST列は従来どおりで、日付だけの
+start/due dateは変換しない。
 
-## C. `custom_fields`
+## metadataと完全性
 
-独自項目は存在する可能性があるが、実field名や実値をrepositoryへ記録しない。対象環境ごとに
-管理者が次を棚卸しする。
+extendedだけ `field_profile=extended`, `export_schema=extended-v1`, 固定順
+`selected_extended_fields`、各固定fieldの `missing_count/null_count/value_count` を追加する。
+value_countは「非null値が返り検証を通った」件数で、業務上の有意な設定済み値という意味ではない。
+日付空文字もvalueで、各fieldの3件数合計はissue_countに一致する。0件は全て0であり、対応有無の
+証拠にはしない。集計に値、ID一覧、未知fieldを含めず、実環境集計もpublic repositoryへ貼らない。
+ページ処理中に選択・集計し、不正値や取得失敗時はwrite/publishへ進まないため既存runを保持する。
 
-- custom field ID（設定上の安定キー候補）と表示name（改名可能性を考慮）
-- value type（文字列、数値、日付、真偽、列挙、ユーザー参照等）
-- 単一値か複数値か、および空値/欠損の区別
-- ロール、project、issue visibilityによる可視性
-- 個人情報・認証情報・業務秘密等の機密区分と保持期限
+## 標準資料と対象環境の制約
 
-実装する場合は**IDの許可リスト方式**を基本とし、未知のfieldを自動収集しない。JSONでは
-型、ID、承認済み表示名、単一/複数値を曖昧にしない構造を定義する。CSVでは列名衝突を避ける
-安定キーを使い、複数値は順序、区切り、escapingを仕様化する（安易な可変列や暗黙joinを
-避ける）。許可項目が見えない場合は空値と権限不足を混同しない検証・警告方針も決める。
+候補はRedmine公式 REST Issues wiki と公式source
+`app/views/issues/index.api.rsb`（GitHub master）を参照対象とした。確認日2026-10-02には、この作業環境の
+web取得がHTTP 401となり内容・commitを再取得できなかったため、特定versionでの網羅性を主張しない。
+作成・更新APIの入力parameterを一覧GETの出力保証とは扱わない。QUICK2での存在、型、空表現、ロール・
+project別可視性、GUIとの業務対応は未確認である。マージ後の承認済み少数件確認で、metadata上返却された
+項目だけをGUIと照合する。取得完了と個々の業務的妥当性確認は別の判定である。
 
-## D. 個別issue GETや`include`が必要になり得る項目
+## 後続段階
 
-`journals`, `relations`, `attachments`, `watchers` 等は、Redmineのバージョンや権限により
-個別issue API、`include`、別endpointを必要とし得る。一覧の1リクエスト/ページとは件数、
-負荷、権限、機密性、ページング、失敗時の完全性が異なるため、basic一覧exportから分離する。
-
-導入前に対象環境の公式/管理者情報と実機で、endpoint、GETだけで得られる範囲、N+1負荷、
-レート制限、最大件数、可視性、attachmentsのバイナリを取得しない方針を確認する。新endpointは
-個別PRで固定パスとしてレビューし、汎用path/method機能にはしない。このPRではいずれも追加しない。
-
-## E. 出力profile案と移行
-
-後続PRでは次のような固定profileを検討する。
-
-- `--fields basic`: 現行最小項目。既定のままとし、列順・JSON schemaを維持する。
-- `--fields extended`: 対象環境で確認・承認した標準追加項目だけの固定許可リスト。
-- custom fields: field ID許可リストを別の明示opt-in設定にする。
-- 本文: profileからも独立した明示opt-inとし、承認済み用途だけにする。
-
-既存利用者を壊さないため、新項目はbasicへ暗黙追加しない。profile名、schema version、選択項目を
-metadataへ記録する案を検討し、CSV/JSONのgolden test、欠損/型違い、機密非表示、最大サイズ、
-旧basic完全一致をCIで検証する。導入順は標準の低機密・小容量項目、承認済みcustom field、
-本文/個別issue情報の順とし、各段階を独立PRにする。
+description、custom_fields、本文、個別issue情報はPR-1.2に含めない。custom fieldsは対象環境ごとのID、
+型、複数値、可視性、機密区分を確認して別の許可リストPRとする。journals、relations、attachments、
+watchers等の新endpoint/includeも負荷・権限を別レビューし、汎用path/methodや全項目探索は導入しない。

@@ -13,6 +13,7 @@ from typing import Any
 
 from .errors import AppError
 from .exporter import ExportResult
+from .fields import EXTENDED_CSV_COLUMNS
 
 CSV_COLUMNS = [
     "id",
@@ -38,7 +39,9 @@ def csv_safe(value: Any) -> Any:
     return value
 
 
-def _csv_row(issue: dict[str, Any], include_jst_columns: bool) -> dict[str, Any]:
+def _csv_row(
+    issue: dict[str, Any], include_jst_columns: bool, extended: bool = False
+) -> dict[str, Any]:
     row = {
         "id": issue["id"],
         "subject": issue["subject"],
@@ -57,6 +60,23 @@ def _csv_row(issue: dict[str, Any], include_jst_columns: bool) -> dict[str, Any]
         row.update(
             created_on_jst=issue.get("created_on_jst"),
             updated_on_jst=issue.get("updated_on_jst"),
+        )
+    if extended:
+        for field in ("priority", "author", "category", "fixed_version"):
+            reference = issue.get(field)
+            row[f"{field}_id"] = (
+                reference.get("id") if isinstance(reference, dict) else None
+            )
+            row[f"{field}_name"] = (
+                reference.get("name") if isinstance(reference, dict) else None
+            )
+        parent = issue.get("parent")
+        row["parent_id"] = parent.get("id") if isinstance(parent, dict) else None
+        for field in ("start_date", "due_date", "done_ratio", "estimated_hours"):
+            row[field] = issue.get(field)
+        private = issue.get("is_private")
+        row["is_private"] = (
+            "true" if private is True else "false" if private is False else None
         )
     return {key: csv_safe(value) for key, value in row.items()}
 
@@ -82,11 +102,15 @@ def write_outputs(result: ExportResult, output_dir: Path) -> tuple[Path, Path]:
             or result.metadata.get("include_jst_columns") is True
         )
         columns = CSV_COLUMNS + (JST_CSV_COLUMNS if include_jst_columns else [])
+        extended = result.metadata.get("field_profile") == "extended"
+        if extended:
+            columns += list(EXTENDED_CSV_COLUMNS)
         with staged_csv.open("w", encoding="utf-8-sig", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=columns)
             writer.writeheader()
             writer.writerows(
-                _csv_row(issue, include_jst_columns) for issue in result.issues
+                _csv_row(issue, include_jst_columns, extended)
+                for issue in result.issues
             )
         with staged_json.open("w", encoding="utf-8") as stream:
             json.dump(

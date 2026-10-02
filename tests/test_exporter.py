@@ -5,6 +5,7 @@ from redmine_readonly.client import RedmineClient
 from redmine_readonly.config import Config
 from redmine_readonly.errors import AppError
 from redmine_readonly.exporter import fetch_issues, select_fields, to_jst
+from redmine_readonly.fields import EXTENDED_FIELDS
 
 
 def client(config, responses):
@@ -162,3 +163,120 @@ def test_jst_columns_are_opt_in_and_raw_values_are_unchanged():
     assert with_jst["updated_on_jst"] == "2026-01-02 09:00:00 +09:00"
     assert raw_issue["created_on"] == original_created
     assert raw_issue["updated_on"] == original_updated
+
+
+def extended_issue(number=1):
+    item = issue(number)
+    item.update(
+        priority={"id": 3, "name": "高", "ignored": "secret"},
+        author={"id": 4, "name": "架空 作成者"},
+        category={"id": 5, "name": '=架空\n"分類"'},
+        fixed_version={"id": 6, "name": "架空版"},
+        parent={"id": 7, "subject": "must be discarded"},
+        start_date="2026-02-28",
+        due_date="",
+        done_ratio=0,
+        estimated_hours=0.0,
+        is_private=False,
+        description="must not be selected",
+        custom_fields=[{"id": 99, "value": "must not be selected"}],
+    )
+    return item
+
+
+def test_extended_selects_only_fixed_validated_fields_and_keeps_falsy_values():
+    selected = select_fields(extended_issue(), field_profile="extended")
+    assert selected["priority"] == {"id": 3, "name": "高"}
+    assert selected["parent"] == {"id": 7}
+    assert selected["due_date"] == ""
+    assert selected["done_ratio"] == 0
+    assert selected["estimated_hours"] == 0.0
+    assert selected["is_private"] is False
+    assert "description" not in selected and "custom_fields" not in selected
+
+
+def test_extended_distinguishes_missing_null_and_value_across_pages(config):
+    first = issue(1)
+    first["priority"] = None
+    second = issue(2)
+    second["priority"] = {"id": 1}
+    api = client(config, [page([first], 2, 0), page([second], 2, 1)])
+    result = fetch_issues(api, "p", field_profile="extended")
+    assert result.issues[0]["priority"] is None
+    assert result.issues[1]["priority"] == {"id": 1}
+    assert "author" not in result.issues[0]
+    assert result.metadata["extended_field_availability"]["priority"] == {
+        "missing_count": 0,
+        "null_count": 1,
+        "value_count": 1,
+    }
+    for field in EXTENDED_FIELDS:
+        assert sum(result.metadata["extended_field_availability"][field].values()) == 2
+    assert all("fields" not in call[2]["params"] for call in api._session.calls)
+
+
+def test_empty_extended_metadata_has_fixed_zero_counts(config):
+    result = fetch_issues(client(config, [page([], 0)]), "p", field_profile="extended")
+    assert result.metadata["field_profile"] == "extended"
+    assert result.metadata["export_schema"] == "extended-v1"
+    assert result.metadata["selected_extended_fields"] == list(EXTENDED_FIELDS)
+    assert all(
+        counts == {"missing_count": 0, "null_count": 0, "value_count": 0}
+        for counts in result.metadata["extended_field_availability"].values()
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("priority", True, "structure"),
+        ("priority", {"id": True}, "type"),
+        ("author", {"id": "4"}, "type"),
+        ("category", {"id": 1, "name": 9}, "name type"),
+        ("fixed_version", {"id": 0}, "value"),
+        ("parent", {"name": "no id"}, "structure"),
+        ("start_date", "2026-02-30", "date"),
+        ("due_date", 1, "type"),
+        ("done_ratio", True, "type"),
+        ("done_ratio", "0", "type"),
+        ("done_ratio", 101, "range"),
+        ("estimated_hours", True, "type"),
+        ("estimated_hours", "0", "type"),
+        ("estimated_hours", -1, "value"),
+        ("estimated_hours", float("nan"), "value"),
+        ("estimated_hours", float("inf"), "value"),
+        ("is_private", "false", "type"),
+    ],
+)
+def test_extended_rejects_invalid_values_without_echo(field, value, message):
+    raw = issue(999)
+    raw[field] = value
+    with pytest.raises(AppError, match=message) as caught:
+        select_fields(raw, field_profile="extended")
+    error = str(caught.value)
+    assert field in error
+    assert "999" not in error
+    assert repr(value) not in error
+
+
+def test_extended_name_limit_is_rejected_without_value():
+    raw = issue(1)
+    raw["author"] = {"id": 1, "name": "秘密" * 2049}
+    with pytest.raises(AppError, match="maximum length") as caught:
+        select_fields(raw, field_profile="extended")
+    assert "秘密" not in str(caught.value)
+
+
+def test_invalid_profile_fails_before_request(config):
+    api = client(config, [])
+    with pytest.raises(AppError, match="field profile"):
+        fetch_issues(api, "p", field_profile="unknown")
+    assert api._session.calls == []
+
+
+def test_basic_ignores_invalid_extended_values(config):
+    raw = issue(1)
+    raw["done_ratio"] = "not validated in basic"
+    result = fetch_issues(client(config, [page([raw], 1)]), "p")
+    assert "done_ratio" not in result.issues[0]
+    assert "field_profile" not in result.metadata

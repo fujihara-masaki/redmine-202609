@@ -14,7 +14,7 @@ publicリポジトリを前提に秘密・実データを残さず、変更操�
 
 受入条件は、全自動テスト通過、GET以外が存在しないこと、未完取得が出力されないこと、チェックリストの確認結果が「未実施」と明記されることです。
 
-## PR-1.1: 実機確認結果と読み取り専用UX（今回）
+## PR-1.1: 実機確認結果と読み取り専用UX
 
 - Windows 11での初回導入、PC再起動/新規PowerShell後の再開、実機照合runbook
 - 固定GET endpointによるproject identifier/数値IDの安全なresolution
@@ -24,6 +24,15 @@ publicリポジトリを前提に秘密・実データを残さず、変更操�
 許可するHTTP操作は `GET /users/current.json`、`GET /issues.json`、
 `GET /projects/{id_or_identifier}.json` だけです。変更候補生成、変更系API、個別issue endpointは
 追加せず、PR-2の計画も変更しません。
+
+## PR-1.2: extended standard fields（今回）
+
+- 既定のbasicを完全に維持し、明示 `--fields extended` だけで標準10項目を固定許可リスト出力
+- 欠損/null/非null値をJSONと値なしmetadata集計で区別し、型・範囲・長さを安全に検証
+- 既存JST opt-inとの直交した組合せ、固定CSV列、HTTPをモックした互換・異常系テスト
+- QUICK2での返却shape、権限差、GUIとの業務的対応は未確認で、マージ後に承認済み少数件で確認
+
+許可GET endpointと検索条件を増やさず、本文、custom field、個別issue情報、変更候補は対象外とする。
 
 ## PR-2: 変更候補の作成（計画のみ）
 
