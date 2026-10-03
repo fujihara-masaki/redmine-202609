@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from conftest import FakeResponse, FakeSession
 
 from redmine_readonly.cli import run
@@ -106,3 +107,22 @@ def test_resolve_project_prints_only_minimum_fields(
     )
     assert "must not be shown" not in captured.out
     assert {call[0] for call in session.calls} == {"GET"}
+
+
+def test_unknown_field_profile_is_argparse_error_before_api(monkeypatch):
+    monkeypatch.setenv("REDMINE_API_KEY", "TEST-ONLY-KEY")
+    with pytest.raises(SystemExit) as caught:
+        run(
+            [
+                "--config",
+                "does-not-need-to-exist.toml",
+                "export",
+                "--project",
+                "1",
+                "--output-dir",
+                "out",
+                "--fields",
+                "unknown",
+            ]
+        )
+    assert caught.value.code == 2

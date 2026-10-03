@@ -8,6 +8,7 @@ from conftest import issue
 
 from redmine_readonly.errors import AppError
 from redmine_readonly.exporter import ExportResult, select_fields
+from redmine_readonly.fields import EXTENDED_CSV_COLUMNS
 from redmine_readonly.output import write_outputs
 
 
@@ -115,3 +116,36 @@ def test_empty_jst_export_still_has_optional_csv_columns(tmp_path: Path):
     with csv_path.open(encoding="utf-8-sig", newline="") as stream:
         columns = next(csv.reader(stream))
     assert columns[-2:] == ["created_on_jst", "updated_on_jst"]
+
+
+@pytest.mark.parametrize("include_jst", [False, True])
+def test_empty_extended_export_has_fixed_columns(tmp_path: Path, include_jst):
+    metadata = {"issue_count": 0, "field_profile": "extended"}
+    if include_jst:
+        metadata["include_jst_columns"] = True
+    csv_path, _ = write_outputs(ExportResult([], metadata), tmp_path)
+    with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+        columns = next(csv.reader(stream))
+    assert len(columns) == (28 if include_jst else 26)
+    assert columns[-14:] == list(EXTENDED_CSV_COLUMNS)
+
+
+def test_extended_csv_matches_json_and_applies_shared_formula_protection(tmp_path):
+    raw = issue(1)
+    raw.update(
+        priority={"id": 2, "name": " =FORMULA"},
+        is_private=False,
+        done_ratio=0,
+        estimated_hours=0.0,
+    )
+    selected = select_fields(raw, field_profile="extended")
+    result = ExportResult([selected], {"issue_count": 1, "field_profile": "extended"})
+    csv_path, json_path = write_outputs(result, tmp_path)
+    with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+        row = next(csv.DictReader(stream))
+    assert row["priority_name"] == "' =FORMULA"
+    assert row["is_private"] == "false"
+    assert row["done_ratio"] == "0"
+    assert row["estimated_hours"] == "0.0"
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["issues"][0]["priority"]["name"] == " =FORMULA"

@@ -73,13 +73,36 @@ JSONは開始・終了日時、抽出条件、件数、ページ数と選択項�
 `updated_on_jst` (`UTC+09:00`) をCSVとJSONへ追加します。raw列は置換しません。flagなしの
 basic schemaは従来どおりです。
 
+### 出力field profile
+
+`export --fields basic|extended` はローカルの出力選択で、既定は従来互換の `basic` です。
+`extended` は、承認済みの対象・保存先について利用者が明示的に選ぶopt-inです。author等は
+個人を識別し得て、category/fixed_versionのnameも業務情報になり得ます。
+
+`extended` はbasicに `priority`, `author`, `category`, `fixed_version`, `parent`,
+`start_date`, `due_date`, `done_ratio`, `estimated_hours`, `is_private` の固定10項目だけを
+追加します。APIにないキーはJSONでも省略し、明示nullはnull、0/0.0/false/日付の空文字は
+値として保持します。CSVでは欠損・null・空文字はいずれも空欄になり得るため、区別にはJSONを
+使います。`--include-jst-columns` は独立して併用でき、日付だけのstart/due dateはJST変換しません。
+
+extended CSVは既存12列（JST指定時は直後に既存2列）の後へ、`priority_id`,
+`priority_name`, `author_id`, `author_name`, `category_id`, `category_name`,
+`fixed_version_id`, `fixed_version_name`, `parent_id`, `start_date`, `due_date`,
+`done_ratio`, `estimated_hours`, `is_private` の順で追加します。0件でも26列（JST併用は28列）です。
+JSON metadataにはprofile/schema、固定選択項目、各項目のmissing/null/value件数だけを追加します。
+valueは「非nullで検証に合格した応答」であり、業務上設定済みという意味ではありません。
+返らない値の原因を推測・補完せず、0件から対象環境の対応有無を判断しません。
+
+この切替は `/issues.json` の検索条件、呼出回数、includeを変更しません。API応答自体には保存対象外の
+情報が含まれ得ます。description、custom_fields、journals等、個別issue取得は引き続き対象外です。
+
 ページングでは `limit`, `offset`, `total_count` を検査し、サーバーが要求より少ないページを返しても実返却数で進めます。重複ID、件数変化、早すぎる空ページ、offset不一致、途中失敗、上限到達時は完成出力を書きません。ただし件数一致は取得中の同時更新を含むトランザクション的な完全スナップショットを保証しません。
 
 ## 標準仕様と実環境確認
 
 標準Redmine REST APIのうち、「安全上の境界」に列挙した3種類のGETエンドポイントと、issuesのフィルター・ページングを前提にしています。一方、対象環境のバージョンや改修により、利用可否、フィルター構文、上限、返却項目、権限挙動が異なる可能性があります。`docs/quick2-verification-checklist.md` に従い確認してください。
 
-カスタム項目を含む追加fieldは現在設計段階であり、今回保存しません。管理者と項目の必要性を合意し、対象環境が公開する仕様と安全な検証から項目ID、名称、型、複数値、権限による可視性を確認してください。実データをリポジトリへ貼らず、必要性判明後に許可リスト方式で追加します。段階案は [export項目の拡張設計](docs/export-field-expansion-design.md) を参照してください。
+標準10項目以外（カスタム項目や本文）は現在も設計・後続PRの範囲です。管理者と必要性を合意し、安全な検証から型や可視性を確認してください。段階案は [export項目の拡張設計](docs/export-field-expansion-design.md) を参照してください。extendedのQUICK2実機確認は未実施であり、取得完了とGUI上の業務的妥当性は別に確認します。
 
 ## 開発
 

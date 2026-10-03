@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 from .client import RedmineClient
 from .errors import AppError
+from .fields import EXTENDED_FIELDS, EXTENDED_NAME_MAX_LENGTH, FIELD_PROFILES
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,10 @@ def fetch_issues(
     include_subprojects: bool = False,
     status_id: str = "*",
     include_jst_columns: bool = False,
+    field_profile: str = "basic",
 ) -> ExportResult:
+    if field_profile not in FIELD_PROFILES:
+        raise AppError("field profile must be 'basic' or 'extended'")
     if not project_id.strip():
         raise AppError("project must not be empty")
     if tracker_id is not None and tracker_id <= 0:
@@ -45,6 +50,10 @@ def fetch_issues(
         conditions["tracker_id"] = tracker_id
 
     selected_issues: list[dict[str, Any]] = []
+    availability = {
+        field: {"missing_count": 0, "null_count": 0, "value_count": 0}
+        for field in EXTENDED_FIELDS
+    }
     seen: set[int] = set()
     offset = 0
     expected_total: int | None = None
@@ -84,7 +93,18 @@ def fetch_issues(
             if issue_id in seen:
                 raise AppError("duplicate issue ID detected; export was not written")
             seen.add(issue_id)
-            selected_issues.append(select_fields(issue, include_jst_columns))
+            selected = select_fields(
+                issue, include_jst_columns, field_profile=field_profile
+            )
+            selected_issues.append(selected)
+            if field_profile == "extended":
+                for field in EXTENDED_FIELDS:
+                    bucket = (
+                        "missing_count"
+                        if field not in issue
+                        else ("null_count" if issue[field] is None else "value_count")
+                    )
+                    availability[field][bucket] += 1
             if len(selected_issues) > client.config.max_issues:
                 raise AppError("maximum issue count reached before export completed")
         if page:
@@ -111,6 +131,13 @@ def fetch_issues(
     }
     if include_jst_columns:
         metadata["include_jst_columns"] = True
+    if field_profile == "extended":
+        metadata.update(
+            field_profile="extended",
+            export_schema="extended-v1",
+            selected_extended_fields=list(EXTENDED_FIELDS),
+            extended_field_availability=availability,
+        )
     return ExportResult(selected_issues, metadata)
 
 
@@ -139,8 +166,13 @@ def to_jst(value: Any) -> str | None:
 
 
 def select_fields(
-    issue: dict[str, Any], include_jst_columns: bool = False
+    issue: dict[str, Any],
+    include_jst_columns: bool = False,
+    *,
+    field_profile: str = "basic",
 ) -> dict[str, Any]:
+    if field_profile not in FIELD_PROFILES:
+        raise AppError("field profile must be 'basic' or 'extended'")
     selected = {
         "id": issue.get("id"),
         "subject": issue.get("subject"),
@@ -154,4 +186,73 @@ def select_fields(
     if include_jst_columns:
         selected["created_on_jst"] = to_jst(selected["created_on"])
         selected["updated_on_jst"] = to_jst(selected["updated_on"])
+    if field_profile == "extended":
+        for field in EXTENDED_FIELDS:
+            if field in issue:
+                selected[field] = _extended_value(field, issue[field])
     return selected
+
+
+def _invalid(field: str, reason: str) -> AppError:
+    return AppError(f"extended field '{field}' {reason}")
+
+
+def _positive_id(field: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _invalid(field, "has an invalid type")
+    if value <= 0:
+        raise _invalid(field, "has an invalid value")
+    return value
+
+
+def _extended_reference(
+    field: str, value: Any, *, parent: bool = False
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or "id" not in value:
+        raise _invalid(field, "has an invalid structure")
+    selected: dict[str, Any] = {"id": _positive_id(field, value["id"])}
+    if not parent and "name" in value:
+        name = value["name"]
+        if name is not None and not isinstance(name, str):
+            raise _invalid(field, "has an invalid name type")
+        if isinstance(name, str) and len(name) > EXTENDED_NAME_MAX_LENGTH:
+            raise _invalid(field, "name exceeds the maximum length")
+        selected["name"] = name
+    return selected
+
+
+def _extended_value(field: str, value: Any) -> Any:
+    if value is None:
+        return None
+    if field in {"priority", "author", "category", "fixed_version"}:
+        return _extended_reference(field, value)
+    if field == "parent":
+        return _extended_reference(field, value, parent=True)
+    if field in {"start_date", "due_date"}:
+        if not isinstance(value, str):
+            raise _invalid(field, "has an invalid type")
+        if value:
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError:
+                raise _invalid(field, "has an invalid date") from None
+            if parsed.isoformat() != value:
+                raise _invalid(field, "has an invalid date")
+        return value
+    if field == "done_ratio":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise _invalid(field, "has an invalid type")
+        if not 0 <= value <= 100:
+            raise _invalid(field, "is outside the allowed range")
+        return value
+    if field == "estimated_hours":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise _invalid(field, "has an invalid type")
+        if value < 0 or (isinstance(value, float) and not math.isfinite(value)):
+            raise _invalid(field, "has an invalid value")
+        return value
+    if field == "is_private":
+        if not isinstance(value, bool):
+            raise _invalid(field, "has an invalid type")
+        return value
+    raise _invalid(field, "is not allowed")

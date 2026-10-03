@@ -10,6 +10,7 @@ from .client import RedmineClient
 from .config import load_config
 from .errors import AppError
 from .exporter import fetch_issues
+from .fields import FIELD_PROFILES
 from .output import write_outputs
 
 
@@ -37,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
             "project ID; use the verified numeric ID for QUICK2 "
             "(resolve identifiers with resolve-project)"
         ),
+    )
+    export.add_argument(
+        "--fields",
+        choices=FIELD_PROFILES,
+        default="basic",
+        help="local output field profile (default: basic)",
     )
     export.add_argument(
         "--status",
@@ -85,6 +92,7 @@ def run(argv: list[str] | None = None) -> int:
                 include_subprojects=args.include_subprojects,
                 status_id=args.status,
                 include_jst_columns=args.include_jst_columns,
+                field_profile=args.fields,
             )
             csv_path, json_path = write_outputs(result, args.output_dir)
             print(f"OK: exported {len(result.issues)} issues")

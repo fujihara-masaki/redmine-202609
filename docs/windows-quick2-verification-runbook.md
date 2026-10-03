@@ -223,7 +223,117 @@ $run = $newRuns[0]
 $data = Get-Content "$run\issues.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 ```
 
-## 9. 終了・情報管理
+## 9. PR-1.2更新後のextended少数件確認
+
+既存利用者は作業場所と未整理変更を先に確認し、変更があれば更新せず整理担当へ相談する。
+既存venvを作り直さず、接続確認済み `config.toml` をひな型で上書きしない。
+
+```powershell
+# 例示値。実際のrepositoryのローカルパスへ置き換える。
+$repo = "C:\ApprovedTools\redmine-readonly"
+Set-Location -LiteralPath $repo -ErrorAction Stop
+$worktree = @(git status --porcelain)
+if ($LASTEXITCODE -ne 0) { throw "git status failed; stop before update" }
+git status --short --branch
+if ($LASTEXITCODE -ne 0) { throw "git status failed; stop before update" }
+if ($worktree.Count -ne 0) { throw "uncommitted changes: stop before update" }
+git switch main
+if ($LASTEXITCODE -ne 0) { throw "git switch main failed; stop before update" }
+git pull --ff-only
+if ($LASTEXITCODE -ne 0) { throw "git pull --ff-only failed; do not test or access QUICK2" }
+git status --short --branch
+if ($LASTEXITCODE -ne 0) { throw "git status after update failed; stop" }
+$updatedBranch = git branch --show-current
+if ($LASTEXITCODE -ne 0) { throw "could not record updated branch; stop" }
+$updatedHead = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw "could not record updated HEAD; stop" }
+"Updated branch: $updatedBranch"
+"Updated HEAD: $updatedHead"
+
+# 更新内容を確認し、pyproject.toml等の依存定義が変わった場合だけtrueにする。
+$updateDependencies = $false
+if ($updateDependencies) {
+  .\.venv\Scripts\python.exe -m pip install -e ".[test]"
+  if ($LASTEXITCODE -ne 0) { throw "dependency update failed; do not access QUICK2" }
+}
+
+# pip installの要否にかかわらず、既存venvで以下をすべて実行する。
+.\.venv\Scripts\python.exe -m pytest
+if ($LASTEXITCODE -ne 0) { throw "local tests failed; do not access QUICK2" }
+.\.venv\Scripts\ruff.exe check .
+if ($LASTEXITCODE -ne 0) { throw "Ruff check failed; do not access QUICK2" }
+.\.venv\Scripts\ruff.exe format --check .
+if ($LASTEXITCODE -ne 0) { throw "Ruff format check failed; do not access QUICK2" }
+.\.venv\Scripts\python.exe -m compileall -q src tests
+if ($LASTEXITCODE -ne 0) { throw "compileall failed; do not access QUICK2" }
+```
+
+上のpip installは常時実行する指示ではない。更新前後の依存定義を確認し、依存更新が必要な場合だけ
+実行するコマンド例である。不要ならその2行を飛ばし、既存venvをそのまま使う。どのnative commandも
+直後の `$LASTEXITCODE` を確認し、失敗を後続commandの成功で上書きしない。いずれかが失敗した場合は
+そこで停止し、接続確認やexportへ進まない。接続確認済み `config.toml` はコピー・再作成しない。
+
+次は完全な架空値である。`Read-Host "..."` の引用文字列はprompt表示であって値ではないため、ここでは
+誤認しにくい直接代入を示す。実行前に承認済み数値project IDとrepository外の保存先へ置き換え、
+対象範囲、author等の追加情報の保存、アクセス制御・保持期限の承認を確認する。
+
+```powershell
+# 例示値。実行前に承認済みの値へ置き換える。
+$projectId = "123"
+$out = "C:\ApprovedData\RedmineExports"
+$beforeRuns = @(Get-ChildItem -LiteralPath $out -Directory -Filter "run-*" -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty FullName)
+
+.\.venv\Scripts\redmine-readonly.exe `
+  --config .\config.toml `
+  export `
+  --project $projectId `
+  --include-subprojects `
+  --fields extended `
+  --include-jst-columns `
+  --output-dir $out
+$exportExit = $LASTEXITCODE
+if ($exportExit -ne 0) { throw "export failed; do not inspect an older run" }
+
+$afterRuns = @(Get-ChildItem -LiteralPath $out -Directory -Filter "run-*" -ErrorAction Stop |
+  Select-Object -ExpandProperty FullName)
+$newRuns = @($afterRuns | Where-Object { $_ -notin $beforeRuns })
+if ($newRuns.Count -ne 1) { throw "could not uniquely identify this export run" }
+$run = $newRuns[0]
+Remove-Variable data -ErrorAction SilentlyContinue
+try {
+  $jsonText = Get-Content -LiteralPath (Join-Path $run "issues.json") -Raw -Encoding UTF8 -ErrorAction Stop
+  $data = $jsonText | ConvertFrom-Json -ErrorAction Stop
+} catch {
+  throw "JSON read/parse failed; stop before counts or GUI comparison"
+}
+```
+
+0件、全欠損、一部/全部の非null返却を混同しない。`value_count` は非null応答数（空の日付文字列を含む）で
+「業務値が設定済み」の件数ではない。missingの原因も推測しない。集計自体をpublic GitHubへ貼らない。
+
+```powershell
+if ($data.metadata.field_profile -ne "extended") { throw "unexpected field profile" }
+$data.metadata.issue_count
+$data.metadata.extended_field_availability.PSObject.Properties | ForEach-Object {
+  $counts = $_.Value
+  [PSCustomObject]@{
+    Field = $_.Name
+    Missing = $counts.missing_count
+    Null = $counts.null_count
+    Value = $counts.value_count
+    TotalMatches = (($counts.missing_count + $counts.null_count + $counts.value_count) -eq $data.metadata.issue_count)
+  }
+} | Format-Table -AutoSize
+```
+
+返却されたfieldだけ承認済み少数件でGUIと照合する。取得が完了したことと、値の業務的妥当性確認は
+別に記録する。`created_on_jst` / `updated_on_jst` はraw日時の比較表示だが、`start_date` / `due_date`
+は日付だけでJST変換対象ではない。basicとextendedを別時刻に実行すると同時更新・増減があり得るため、
+過去の固定件数を無条件の期待値にせず、比較時刻と検索条件を確認する。QUICK2 extended確認は本PR時点で
+未実施である。
+
+## 10. 終了・情報管理
 
 APIキーはファイルへ保存せず、環境変数を一時利用した場合は削除する。exportはrepository外の
 承認済み・アクセス制御済みの場所だけに置き、実データ、スクリーンショット、一時検証scriptを
