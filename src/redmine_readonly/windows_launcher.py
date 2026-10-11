@@ -39,7 +39,13 @@ def target_url(config_path: Path, command: str, project: str = "") -> str:
         or parsed.port == 0
     ):
         raise ValueError("invalid target")
-    return url
+    # Session.get prepares the request before merging its environment. Reuse
+    # Requests' URL normalization (IDNA, host case, percent encoding) so that
+    # NO_PROXY is checked against the same URL the existing client will use.
+    prepared = requests.Request("GET", url).prepare().url
+    if prepared is None:
+        raise ValueError("invalid target")
+    return prepared
 
 
 def proxy_identity(value: str) -> tuple[str, str, int]:

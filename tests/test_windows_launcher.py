@@ -33,6 +33,29 @@ def test_target_preserves_subpath(tmp_path, command, project, endpoint):
 
 
 @pytest.mark.parametrize(
+    ("base", "expected"),
+    [
+        (
+            "https://REDMINE.example.invalid/redmine",
+            "https://redmine.example.invalid/redmine/users/current.json",
+        ),
+        (
+            "https://例.example.invalid/redmine",
+            "https://xn--fsq.example.invalid/redmine/users/current.json",
+        ),
+        (
+            "https://redmine.example.invalid/日本語",
+            "https://redmine.example.invalid/%E6%97%A5%E6%9C%AC%E8%AA%9E/users/current.json",
+        ),
+    ],
+)
+def test_target_matches_requests_prepared_url(tmp_path, base, expected):
+    config = tmp_path / "config.toml"
+    config.write_text(f'base_url="{base}"', encoding="utf-8")
+    assert helper.target_url(config, "check") == expected
+
+
+@pytest.mark.parametrize(
     "project", ["../users", "a/b", "a?b", "a#b", "a%2fb", "a\n", "$(x)", ""]
 )
 def test_project_cannot_change_path(tmp_path, project):
