@@ -330,6 +330,10 @@ exit $code
         }
         $result = Invoke-TestChild
         $code = $result.Code
+        if ($code -ne 17) {
+            # Only fixed launcher classifications, never exception values.
+            $result.Text -split '\r?\n' | Where-Object { $_ -match '^(ERROR|WARNING): launcher [a-z-]+ failed$' } | Write-Host
+        }
         Assert-True ($code -eq 17) ('child-process exit: ' + $code)
         $combined = $result.Text
         Assert-True ($combined.Contains('FAKE-CLI-STDOUT') -and $combined.Contains('FAKE-CLI-STDERR') -and $combined.Contains('CALLER-SURVIVED'))
