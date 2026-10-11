@@ -31,3 +31,19 @@ jobs:
         run: ruff format --check .
       - name: Compile Python sources
         run: python -m compileall -q src tests
+      - name: Prepare Windows launcher test venv
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m venv --system-site-packages .venv
+          if ($LASTEXITCODE -ne 0) { throw 'test venv setup failed' }
+          .\.venv\Scripts\python.exe -m pip install --no-deps --no-build-isolation -e .
+          if ($LASTEXITCODE -ne 0) { throw 'test editable setup failed' }
+      - name: Test launcher on Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\windows\launcher.Tests.ps1
+          if (-not $?) { throw 'Windows launcher tests failed' }

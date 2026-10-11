@@ -14,26 +14,25 @@ Redmine REST APIを使い、指定プロジェクトのチケット一覧をCSV/
 
 Python 3.11以上、`requests >=2.31,<3` を使用します。テストは `pytest >=8,<9` です。
 
-### Windows PowerShell
+### Windows PowerShell 5.1
 
-初回導入、PC再起動後の再開、0件/子project/出力/JSTの照合は
-[Windows 11 QUICK2確認runbook](docs/windows-quick2-verification-runbook.md) を使用してください。
-ExecutionPolicy変更を不要にするため、runbookではvenvをactivateせず実行ファイルを直接呼びます。
+初回導入・再起動・コード更新・GUI照合は
+[Windows 11 QUICK2確認runbook](docs/windows-quick2-verification-runbook.md)、
+日常起動とVPN接続後の明示的なSystemプロキシ選択は
+[Windows起動補助の手順](docs/windows-proxy-launcher.md) を使用してください。
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[test]"
-Copy-Item config.example.toml config.toml
-.\.venv\Scripts\redmine-readonly.exe --config config.toml check
-.\.venv\Scripts\redmine-readonly.exe --config config.toml resolve-project `
-  --project sample-project
-# numeric_project_id: <確認した数値ID>
-.\.venv\Scripts\redmine-readonly.exe --config config.toml export `
-  --project <確認した数値ID> `
-  --output-dir "D:\Approved\RedmineExports"
+& .\scripts\Invoke-RedmineReadonly.ps1 -Command check -ProxyMode Inherit
+$checkExit = $LASTEXITCODE
+if ($checkExit -ne 0) { throw "check failed; stop" }
 ```
 
-出力先はリポジトリ外の、組織に承認されたアクセス制御・保管期限・バックアップ方針を持つフォルダを指定します。共有端末や同期対象フォルダを安易に使わないでください。
+Inheritは従来のRequests設定を保持します。Systemを明示した場合だけ、対象API URLの
+Windows/.NET選択とRequestsの実効選択をキー入力前に照合します。プロキシは実行中だけ設定・復元し、
+OSや永続環境は変更しません。wrapperは配置場所のvenv/configを選びます。
+activateは不要ですが、.ps1の実行ポリシーは適用されるため会社の署名・配布方針に従ってください。
+
+出力先はrepository外の、承認されたアクセス制御・保管期限・バックアップ方針を持つフォルダを指定します。
 
 ## 設定とネットワーク
 
@@ -41,10 +40,8 @@ Copy-Item config.example.toml config.toml
 
 社内CAはPEMファイルの承認済みパスを `ca_bundle` に設定します。検証無効化の設定はありません。プロキシはrequests標準の `HTTPS_PROXY` と、必要なら `NO_PROXY` 環境変数を利用します。プロキシURLに認証情報を直接残す運用は避け、組織の資格情報管理手順に従ってください。
 
-```powershell
-$env:HTTPS_PROXY = "http://proxy.example.invalid:8080"
-$env:NO_PROXY = "localhost,127.0.0.1"
-```
+VPN接続後にシステム側の選択を使う場合は、上記起動補助手順のSystemを明示してください。
+NO_PROXY等と選択が競合すれば停止し、設定を勝手に解除しません。
 
 ## コマンド
 
@@ -102,7 +99,7 @@ valueは「非nullで検証に合格した応答」であり、業務上設定�
 
 標準Redmine REST APIのうち、「安全上の境界」に列挙した3種類のGETエンドポイントと、issuesのフィルター・ページングを前提にしています。一方、対象環境のバージョンや改修により、利用可否、フィルター構文、上限、返却項目、権限挙動が異なる可能性があります。`docs/quick2-verification-checklist.md` に従い確認してください。
 
-標準10項目以外（カスタム項目や本文）は現在も設計・後続PRの範囲です。管理者と必要性を合意し、安全な検証から型や可視性を確認してください。段階案は [export項目の拡張設計](docs/export-field-expansion-design.md) を参照してください。extendedのQUICK2実機確認は未実施であり、取得完了とGUI上の業務的妥当性は別に確認します。
+標準10項目以外（カスタム項目や本文）は現在も設計・後続PRの範囲です。管理者と必要性を合意し、安全な検証から型や可視性を確認してください。段階案は [export項目の拡張設計](docs/export-field-expansion-design.md) を参照してください。利用者から既存CLIの手動プロキシ指定でextended取得・GUI照合成功の報告があります。今回の起動補助によるQUICK2実機確認は未実施で、取得完了とGUI上の業務的妥当性は別に確認します。
 
 ## 開発
 
