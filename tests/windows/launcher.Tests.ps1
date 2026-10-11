@@ -247,8 +247,13 @@ try {
         & $python -m venv --system-site-packages (Join-Path $integration '.venv')
         if ($LASTEXITCODE -ne 0) { throw 'integration venv setup failed' }
         $childPython = Join-Path $integration '.venv\Scripts\python.exe'
-        & $childPython -m pip install --no-deps --no-build-isolation -e $integration
-        if ($LASTEXITCODE -ne 0) { throw 'integration editable setup failed' }
+        # The dedicated fixture shadows only the source modules. Reuse installed
+        # Requests without downloading/building any packages during the test.
+        # An ASCII .pth line also works on 5.1/3.11 with non-ASCII root paths.
+        $source = (Join-Path $integration 'src') | ConvertTo-Json -Compress
+        $source = [regex]::Replace($source, '[^\x00-\x7f]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
+        $pth = Join-Path $integration '.venv\Lib\site-packages\launcher-fixture.pth'
+        [IO.File]::WriteAllText($pth, ('import sys; sys.path.insert(0, ' + $source + ')' + [Environment]::NewLine), [Text.Encoding]::ASCII)
         $config = Join-Path $integration '設定 (sample).toml'
         Set-Content -LiteralPath $config -Value 'base_url="https://redmine.example.invalid/redmine"' -Encoding UTF8
         # Windows PS UTF8 writes BOM; TOML fixture must be UTF8 without BOM.
