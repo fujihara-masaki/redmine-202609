@@ -162,6 +162,8 @@ Requests timeoutはPAC評価全体の時間上限ではない。helper自体はH
 追加PythonテストはHTTPを拒否してURL・URI・Requests実効選択を検査する。
 `tests/windows/launcher.Tests.ps1` は追加依存なし。Windows CIでは `shell: powershell` で
 Desktop 5.1を要求して実スクリプト/内部関数を実行し、件数不足やskipだけの成功を拒否する。
+CIの一時venvにはfixtureのeditable build用のsetuptools 80.9.0 / wheel 0.45.1を導入する。
+これはCI用ビルド依存で、利用者の起動時依存やpyprojectの依存範囲は増やさない。
 PACと本体CLIを架空境界へ差し替え、専用子プロセスで実引数・環境・stdout/stderr・復元・終了を検査する。
 
 ```powershell

@@ -38,6 +38,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python -m venv --system-site-packages .venv
           if ($LASTEXITCODE -ne 0) { throw 'test venv setup failed' }
+          .\.venv\Scripts\python.exe -m pip install setuptools==80.9.0 wheel==0.45.1
+          if ($LASTEXITCODE -ne 0) { throw 'CI build tooling setup failed' }
           .\.venv\Scripts\python.exe -m pip install --no-deps --no-build-isolation -e .
           if ($LASTEXITCODE -ne 0) { throw 'test editable setup failed' }
       - name: Test launcher on Windows PowerShell 5.1

@@ -61,7 +61,14 @@ function Get-ReadonlyDecision {
 
 function Get-ReadonlyEnvironment {
     $variables = [Environment]::GetEnvironmentVariables('Process')
-    return @{ Exists = $variables.Contains('HTTPS_PROXY'); Value = $variables['HTTPS_PROXY'] }
+    # Windows environment names are case insensitive; the returned dictionary
+    # must not be assumed to have the same comparer.
+    foreach ($name in $variables.Keys) {
+        if ([string]::Equals($name, 'HTTPS_PROXY', [StringComparison]::OrdinalIgnoreCase)) {
+            return @{ Exists = $true; Value = $variables[$name] }
+        }
+    }
+    return @{ Exists = $false; Value = $null }
 }
 
 function Set-ReadonlyEnvironment {
