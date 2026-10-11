@@ -114,7 +114,10 @@ def handle(message: dict) -> dict:
 
 def main() -> None:
     try:
-        result = handle(json.load(sys.stdin))
+        # .NET Framework's StandardInput writer can emit an encoding preamble.
+        # json.loads(bytes) uses JSON's own UTF-8/16/32 BOM detection rather than
+        # the Python console code page. Only the helper stdin is redirected.
+        result = handle(json.loads(sys.stdin.buffer.read()))
         print(json.dumps(result, ensure_ascii=True))
     except Exception:  # noqa: BLE001 - private boundary must never echo input
         print("ERROR: launcher preflight failed", file=sys.stderr)

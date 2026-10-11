@@ -196,13 +196,35 @@ def test_lowercase_selection_uses_requests_rules(clean_proxy_environment):
 def test_main_masks_all_helper_errors(monkeypatch, capsys):
     import io
 
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"secret": "FAKE-SECRET"})))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.TextIOWrapper(io.BytesIO(json.dumps({"secret": "FAKE-SECRET"}).encode())),
+    )
     with pytest.raises(SystemExit) as exc:
         helper.main()
     assert exc.value.code == 3
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "ERROR: launcher preflight failed\n"
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig", "utf-16", "utf-32"])
+def test_helper_accepts_dotnet_pipe_preamble(monkeypatch, capsys, encoding):
+    import io
+
+    message = {"fixture": "設定 (sample)"}
+    payload = json.dumps(message, ensure_ascii=True).encode(encoding)
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(payload)))
+
+    def handle(request):
+        assert request == message
+        return {"ok": True}
+
+    monkeypatch.setattr(helper, "handle", handle)
+    helper.main()
+    captured = capsys.readouterr()
+    assert captured.out == '{"ok": true}\n'
+    assert captured.err == ""
 
 
 def test_wrong_editable_installation(tmp_path):
