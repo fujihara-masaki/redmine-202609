@@ -136,6 +136,21 @@ try {
         Assert-True ((Launch @{Command='check'; ProxyMode='System'}) -eq 3)
         Assert-True ((State).restore -eq 1 -and (State).cli -eq 0)
     }
+    Test-Case 'simulated cancellation restores environment' {
+        & $module { function script:Invoke-ReadonlyCli { throw (New-Object OperationCanceledException('FAKE-SECRET')) } }
+        Assert-True ((Launch @{Command='check'; ProxyMode='System'}) -eq 3)
+        Assert-True ((State).restore -eq 1 -and (State).environment -eq (State).snapshot.Value)
+    }
+    Test-Case 'exception details and internal URL are never forwarded' {
+        $writer = New-Object IO.StringWriter
+        $previous = [Console]::Error
+        try {
+            [Console]::SetError($writer)
+            (State).failHelper = $true
+            Assert-True ((Launch @{Command='check'; ProxyMode='System'}) -eq 3)
+        } finally { [Console]::SetError($previous) }
+        Assert-True ($writer.ToString() -eq ('ERROR: launcher proxy-conflict-or-preflight failed' + [Environment]::NewLine))
+    }
     foreach ($mode in @('PROXY', 'DIRECT')) {
         Test-Case ($mode + ' Requests conflict stops before CLI') {
             $s = State; $s.requestsConflict = $true
@@ -265,6 +280,11 @@ function Get-ReadonlySystemProxy { param($Target) return [Uri] 'http://chosen.ex
 param($Repo, $Output)
 $ErrorActionPreference = 'Stop'
 $env:HTTPS_PROXY = 'http://original.example.invalid:8080'
+if ($env:TEST_SNAPSHOT -eq 'absent') { Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue }
+if ($env:TEST_SNAPSHOT -eq 'lowercase') {
+    Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+    $env:https_proxy = 'http://original.example.invalid:8080'
+}
 $env:HTTP_PROXY = 'http://other.example.invalid:8080'
 $env:ALL_PROXY = 'http://other.example.invalid:8080'
 $env:NO_PROXY = 'localhost'
@@ -275,7 +295,9 @@ $initialLocation = (Get-Location).Path
 $options = @{ Command='export'; ProxyMode='System'; ConfigPath='設定 (sample).toml'; Project='42'; OutputDir=$Output; Fields='extended'; Status='*'; Tracker=2; IncludeSubprojects=$true; IncludeJstColumns=$true }
 & (Join-Path $Repo 'scripts\Invoke-RedmineReadonly.ps1') @options
 $code = $LASTEXITCODE
-if ($env:HTTPS_PROXY -ne 'http://original.example.invalid:8080') { throw 'restore failed' }
+if ($env:TEST_SNAPSHOT -eq 'absent') {
+    if (Test-Path Env:HTTPS_PROXY) { throw 'absence restore failed' }
+} elseif ($env:HTTPS_PROXY -ne 'http://original.example.invalid:8080') { throw 'restore failed' }
 if ((Get-Location).Path -ne $initialLocation) { throw 'cwd changed' }
 Write-Output 'CALLER-SURVIVED'
 exit $code
@@ -283,10 +305,12 @@ exit $code
         [IO.File]::WriteAllText($caller, $callerText, (New-Object Text.UTF8Encoding($true)))
         $out = Join-Path $temporary '架空 output (exports)'
         function Invoke-TestChild {
+            param([string] $Snapshot = 'value')
             $start = New-Object Diagnostics.ProcessStartInfo
             $start.FileName = Join-Path $PSHOME 'powershell.exe'
             $start.Arguments = '-NoProfile -File "' + $caller + '" "' + $integration + '" "' + $out + '\\"'
             $start.UseShellExecute = $false
+            $start.EnvironmentVariables['TEST_SNAPSHOT'] = $Snapshot
             $start.RedirectStandardOutput = $true
             $start.RedirectStandardError = $true
             $process = New-Object Diagnostics.Process
@@ -308,6 +332,19 @@ exit $code
         Assert-True (-not (Test-Path -LiteralPath $out)) 'launcher must not create output runs'
         $script:count++
         Write-Host 'PASS: real child environment, UTF8 helper, native arguments, stdout/stderr, exit and caller survival'
+        foreach ($snapshot in @('absent', 'lowercase')) {
+            $result = Invoke-TestChild -Snapshot $snapshot
+            Assert-True ($result.Code -eq 17 -and $result.Text.Contains('CALLER-SURVIVED'))
+            $script:count++
+            Write-Host ('PASS: real Process environment restoration with snapshot=' + $snapshot)
+        }
+        # Real successful CLI exit, including stderr, must remain success.
+        [IO.File]::WriteAllText((Join-Path $integration 'src\redmine_readonly\cli.py'), $cli.Replace('SystemExit(17)', 'SystemExit(0)'), (New-Object Text.UTF8Encoding($false)))
+        $result = Invoke-TestChild
+        Assert-True ($result.Code -eq 0 -and $result.Text.Contains('FAKE-CLI-STDERR') -and $result.Text.Contains('CALLER-SURVIVED'))
+        $script:count++
+        Write-Host 'PASS: real CLI success preserves zero exit even with stderr'
+        [IO.File]::WriteAllText((Join-Path $integration 'src\redmine_readonly\cli.py'), $cli, (New-Object Text.UTF8Encoding($false)))
         # Real Requests NO_PROXY disagreement: no CLI and no API fallback.
         [IO.File]::WriteAllText($caller, $callerText.Replace("'localhost'", "'*'"), (New-Object Text.UTF8Encoding($true)))
         $result = Invoke-TestChild
