@@ -128,6 +128,7 @@ function Resolve-ReadonlyPath {
 function Invoke-ReadonlyLauncher {
     param([string] $Root, [hashtable] $Options)
     $code = 3
+    $cliCompleted = $false
     $changed = $false
     $snapshot = $null
     $classification = 'input'
@@ -203,6 +204,7 @@ function Invoke-ReadonlyLauncher {
         }
         $classification = 'launch'
         $code = Invoke-ReadonlyCli $python $cliArgs
+        $cliCompleted = $true
     } catch {
         [Console]::Error.WriteLine('ERROR: launcher ' + $classification + ' failed')
         $code = 3
@@ -210,7 +212,7 @@ function Invoke-ReadonlyLauncher {
         if ($changed) {
             try { Restore-ReadonlyEnvironment $snapshot } catch {
                 [Console]::Error.WriteLine('WARNING: launcher environment cleanup failed')
-                if ($code -eq 0 -or $code -eq 3) { $code = 4 }
+                if ($code -eq 0 -or -not $cliCompleted) { $code = 4 }
             }
         }
     }

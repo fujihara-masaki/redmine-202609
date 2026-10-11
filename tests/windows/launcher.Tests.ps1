@@ -218,7 +218,7 @@ try {
             }
         }
     }
-    foreach ($cliCode in @(0, 17)) {
+    foreach ($cliCode in @(0, 3, 17)) {
         Test-Case ('cleanup failure retains nonzero state, CLI=' + $cliCode) {
             $s = State; $s.failRestore = $true; $s.code = $cliCode
             $expected = 4; if ($cliCode -ne 0) { $expected = $cliCode }
