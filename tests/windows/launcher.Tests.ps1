@@ -251,7 +251,9 @@ try {
         [IO.File]::WriteAllText($parentSitesPath, 'import json,site; print(json.dumps(site.getsitepackages(),ensure_ascii=True))', [Text.Encoding]::ASCII)
         $parentSitesText = & $python -I $parentSitesPath
         if ($LASTEXITCODE -ne 0) { throw 'parent package directory discovery failed' }
-        $parentSites = @($parentSitesText | ConvertFrom-Json -ErrorAction Stop)
+        # PS 5.1 emits a JSON array as one pipeline object. An outer @(...)
+        # would nest that array, producing a non-string sys.path entry.
+        [string[]] $parentSites = $parentSitesText | ConvertFrom-Json -ErrorAction Stop
         if ($parentSites.Count -eq 0) { throw 'parent package directories missing' }
         & $python -m venv --without-pip (Join-Path $integration '.venv')
         if ($LASTEXITCODE -ne 0) { throw 'integration venv setup failed' }
