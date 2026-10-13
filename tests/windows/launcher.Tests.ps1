@@ -254,6 +254,13 @@ try {
         $source = [regex]::Replace($source, '[^\x00-\x7f]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
         $pth = Join-Path $integration '.venv\Lib\site-packages\launcher-fixture.pth'
         [IO.File]::WriteAllText($pth, ('import sys; sys.path.insert(0, ' + $source + ')' + [Environment]::NewLine), [Text.Encoding]::ASCII)
+        # This probe prints only fixed flags from the synthetic fixture. It
+        # does not import the helper (which imports Requests before main).
+        $probeCode = 'import importlib.util,json,pathlib,sys; root=pathlib.Path(sys.argv[1]).resolve(); spec=importlib.util.find_spec("redmine_readonly.windows_launcher"); print(json.dumps(dict(requests_available=importlib.util.find_spec("requests") is not None, prefix_matches=pathlib.Path(sys.prefix).resolve()==root/".venv", source_matches=spec is not None and pathlib.Path(spec.origin).resolve()==root/"src/redmine_readonly/windows_launcher.py")))'
+        $probeText = & $childPython -I -c $probeCode $integration
+        if ($LASTEXITCODE -ne 0) { throw 'fixture probe failed' }
+        $probe = $probeText | ConvertFrom-Json -ErrorAction Stop
+        Write-Host ('TEST-FIXTURE: requests_available=' + $probe.requests_available + '; prefix_matches=' + $probe.prefix_matches + '; source_matches=' + $probe.source_matches)
         $config = Join-Path $integration '設定 (sample).toml'
         Set-Content -LiteralPath $config -Value 'base_url="https://redmine.example.invalid/redmine"' -Encoding UTF8
         # Windows PS UTF8 writes BOM; TOML fixture must be UTF8 without BOM.

@@ -13,32 +13,37 @@ jobs:
   checks:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+            venv-python: ./.venv/bin/python
+          - os: windows-latest
+            python-version: "3.11"
+            venv-python: ./.venv/Scripts/python.exe
+          - os: windows-latest
+            python-version: "3.12"
+            venv-python: ./.venv/Scripts/python.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install -e ".[test]"
-      - name: Run tests
-        run: python -m pytest
-      - name: Run Ruff lint
-        run: ruff check .
-      - name: Check Ruff formatting
-        run: ruff format --check .
-      - name: Compile Python sources
-        run: python -m compileall -q src tests
-      - name: Prepare Windows launcher test venv
-        if: runner.os == 'Windows'
-        shell: powershell
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          python -m venv --system-site-packages .venv
-          if ($LASTEXITCODE -ne 0) { throw 'test venv setup failed' }
-          # Reuse the package/dependencies installed above via system site.
+          set -euo pipefail
+          python -m venv .venv
+          ${{ matrix.venv-python }} -m pip install -e ".[test]"
+      - name: Run tests
+        run: ${{ matrix.venv-python }} -m pytest
+      - name: Run Ruff lint
+        run: ${{ matrix.venv-python }} -m ruff check .
+      - name: Check Ruff formatting
+        run: ${{ matrix.venv-python }} -m ruff format --check .
+      - name: Compile Python sources
+        run: ${{ matrix.venv-python }} -m compileall -q src tests
       - name: Test launcher on Windows PowerShell 5.1
         if: runner.os == 'Windows'
         shell: powershell
