@@ -257,7 +257,11 @@ try {
         # This probe prints only fixed flags from the synthetic fixture. It
         # does not import the helper (which imports Requests before main).
         $probeCode = 'import importlib.util,json,pathlib,sys; root=pathlib.Path(sys.argv[1]).resolve(); spec=importlib.util.find_spec("redmine_readonly.windows_launcher"); print(json.dumps(dict(requests_available=importlib.util.find_spec("requests") is not None, prefix_matches=pathlib.Path(sys.prefix).resolve()==root/".venv", source_matches=spec is not None and pathlib.Path(spec.origin).resolve()==root/"src/redmine_readonly/windows_launcher.py")))'
-        $probeText = & $childPython -I -c $probeCode $integration
+        # Keep Python source in a fixture file: PowerShell 5.1's native -c
+        # quoting can otherwise strip Python string-literal double quotes.
+        $probePath = Join-Path $temporary 'fixture-probe.py'
+        [IO.File]::WriteAllText($probePath, $probeCode, [Text.Encoding]::ASCII)
+        $probeText = & $childPython -I $probePath $integration
         if ($LASTEXITCODE -ne 0) { throw 'fixture probe failed' }
         $probe = $probeText | ConvertFrom-Json -ErrorAction Stop
         Write-Host ('TEST-FIXTURE: requests_available=' + $probe.requests_available + '; prefix_matches=' + $probe.prefix_matches + '; source_matches=' + $probe.source_matches)
