@@ -15,6 +15,7 @@ wrapperは自分の配置場所からrepositoryを確定し、そこの `.venv\S
 `config.toml` を使う。カレントディレクトリの別venv/configやグローバルPythonへは切り替えない。
 明示した `ConfigPath` の相対パスもrepository基準。絶対パスも使用できる。
 カレントディレクトリは変更しない。`OutputDir` は空でない絶対パスでrepository外を指定する。
+repositoryと同一・子孫への出力は、ドライブ／UNC共有のルートを含めて拒否する。
 日本語、空白、丸括弧、末尾区切りを含むパスはnative引数へ渡す前に正規化する。
 exportのprojectには確認済み数値IDを推奨する。project要素は既存resolveと同じ検証に限定する。
 
@@ -174,6 +175,11 @@ PACと本体CLIを架空境界へ差し替え、専用子プロセスで実引�
 if (-not $?) { throw 'Windows launcher tests failed' }
 ```
 
-QUICK2実機確認は未実施。マージ後は承認済み少数件で、5.1の対話コンソールでのgetpass、
-本物のCtrl+C、実際のPAC/CA/プロキシ認証条件、実行後の復元を確認する。
-模擬中断やfake CLIの成功を、それらの実機確認の代わりにしない。
+利用者から、HEAD `9b66e02a4ff69d17392a3fe2f4cb99f135eab351` でWindows PowerShell 5.1の
+専用62テスト・Python173テストと、新wrapperのSystemモードでcheck/exportが成功したとの報告がある。
+実行後のHTTPS_PROXYの存在状態・値の復元一致、CSV/JSON/metadataとGUI一覧の件数一致、
+extended＋JSTのCSV列数・返却状況集計の一致も利用者報告で確認した。
+これはCodex自身の接続結果や、今回の包含判定修正後HEADの実測ではない。
+出力サンプル値のGUI照合、本物のCtrl+C、対話コンソールのgetpassは完了報告がない。
+最新版は社内PCで専用テストと通常のrepository外への出力を承認済み手順で再確認する。
+模擬中断やfake CLIの成功を、未確認の実機項目の代わりにしない。
