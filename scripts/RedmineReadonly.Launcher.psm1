@@ -125,6 +125,18 @@ function Resolve-ReadonlyPath {
     return $path
 }
 
+function Test-ReadonlyContainedOutput {
+    param([string] $Root, [string] $Output)
+    # Inputs have already been normalized. Trim only comparison strings so
+    # filesystem roots get exactly one boundary separator. Never change the
+    # actual C:\ root to the drive-relative C:, or the UNC leading separators.
+    $rootComparison = $Root.TrimEnd('\', '/')
+    $outputComparison = $Output.TrimEnd('\', '/')
+    $boundary = $rootComparison + '\'
+    return ($outputComparison.Equals($rootComparison, [StringComparison]::OrdinalIgnoreCase) -or
+        $outputComparison.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase))
+}
+
 function Invoke-ReadonlyLauncher {
     param([string] $Root, [hashtable] $Options)
     $code = 3
@@ -161,8 +173,7 @@ function Invoke-ReadonlyLauncher {
             if (-not $o.ContainsKey('OutputDir') -or [string]::IsNullOrWhiteSpace($o.OutputDir) -or
                 $o.OutputDir -notmatch '\A(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)') { throw 'input' }
             $output = Resolve-ReadonlyPath $o.OutputDir $Root
-            if ($output.Equals($Root, [StringComparison]::OrdinalIgnoreCase) -or
-                $output.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'input' }
+            if (Test-ReadonlyContainedOutput $Root $output) { throw 'input' }
             if ([string]::IsNullOrWhiteSpace($o.Status) -or $o.Status -match '[\x00-\x1f\x7f"]') { throw 'input' }
             $cliArgs += @('--output-dir', $output, '--fields', $o.Fields, ('--status=' + $o.Status))
             if ($o.ContainsKey('Tracker')) {

@@ -21,7 +21,8 @@ Set-Content -LiteralPath (Join-Path $fixture 'config.toml') -Value 'placeholder'
 $originals = & $module {
     $saved = @{}
     foreach ($name in @('Invoke-ReadonlyHelper', 'Get-ReadonlySystemProxy', 'Invoke-ReadonlyCli',
-        'Get-ReadonlyEnvironment', 'Set-ReadonlyEnvironment', 'Restore-ReadonlyEnvironment')) {
+        'Get-ReadonlyEnvironment', 'Set-ReadonlyEnvironment', 'Restore-ReadonlyEnvironment',
+        'Test-ReadonlyContainedOutput')) {
         $saved[$name] = (Get-Item ('Function:' + $name)).ScriptBlock
     }
     return $saved
@@ -176,6 +177,117 @@ try {
     Test-Case 'repository output is refused' {
         Assert-True ((Launch @{Command='export'; Project='42'; OutputDir=$fixture}) -eq 3)
         Assert-True ((State).cli -eq 0)
+    }
+    # GetFullPath/GetPathRoot and the comparison operate only on fictional
+    # strings. No directory at a drive root or on a UNC share is accessed.
+    $containmentCases = @(
+        @{Name='drive root equal'; Root='C:\'; Output='C:\'; Inside=$true},
+        @{Name='drive root child'; Root='C:\'; Output='C:\Exports'; Inside=$true},
+        @{Name='drive root dots'; Root='C:\.\'; Output='C:\Exports\..'; Inside=$true},
+        @{Name='different drive'; Root='C:\'; Output='D:\Exports'; Inside=$false},
+        @{Name='UNC root equal without separator'; Root='\\files.example.invalid\share'; Output='\\files.example.invalid\share\'; Inside=$true},
+        @{Name='UNC root equal with separator'; Root='\\files.example.invalid\share\'; Output='\\files.example.invalid\share'; Inside=$true},
+        @{Name='UNC root child'; Root='\\files.example.invalid\share\'; Output='\\files.example.invalid\share\Exports'; Inside=$true},
+        @{Name='UNC child without root separator'; Root='\\files.example.invalid\share'; Output='\\files.example.invalid\share\Exports\'; Inside=$true},
+        @{Name='different UNC share'; Root='\\files.example.invalid\share\'; Output='\\files.example.invalid\share-other\Exports'; Inside=$false},
+        @{Name='different UNC server'; Root='\\files.example.invalid\share\'; Output='\\other.example.invalid\share\Exports'; Inside=$false},
+        @{Name='normal repository equal'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine'; Inside=$true},
+        @{Name='normal repository child'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine\Exports'; Inside=$true},
+        @{Name='sibling folder'; Root='C:\Tools\redmine'; Output='C:\Tools\other'; Inside=$false},
+        @{Name='similar repository prefix'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine-other\Exports'; Inside=$false},
+        @{Name='repository trailing separator'; Root='C:\Tools\redmine\'; Output='C:\Tools\redmine'; Inside=$true},
+        @{Name='output trailing separator'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine\Exports\'; Inside=$true},
+        @{Name='drive case insensitive'; Root='C:\TOOLS\Redmine'; Output='c:\tools\REDMINE\Exports'; Inside=$true},
+        @{Name='UNC case insensitive'; Root='\\FILES.example.invalid\Share\'; Output='\\files.example.invalid\share\Exports'; Inside=$true},
+        @{Name='dot segments'; Root='C:\Tools\.\redmine'; Output='C:\Tools\redmine\.\Exports'; Inside=$true},
+        @{Name='parent segments inside'; Root='C:\Tools\archive\..\redmine'; Output='C:\Tools\redmine\temp\..\Exports'; Inside=$true},
+        @{Name='parent segment outside'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine\..\other'; Inside=$false},
+        @{Name='drive forward separators'; Root='C:/'; Output='C:/temp/../Exports/'; Inside=$true},
+        @{Name='UNC dot segments'; Root='\\files.example.invalid\share\.'; Output='\\files.example.invalid\share\temp\..'; Inside=$true},
+        @{Name='UNC parent segment outside'; Root='\\files.example.invalid\share\Tools\redmine'; Output='\\files.example.invalid\share\Tools\redmine\..\other'; Inside=$false}
+    )
+    foreach ($case in $containmentCases) {
+        Test-Case ('normalized containment: ' + $case.Name) {
+            $result = & $module {
+                param($Case)
+                $root = Resolve-ReadonlyPath $Case.Root $Case.Root
+                $output = Resolve-ReadonlyPath $Case.Output $root
+                return @{ Inside=(Test-ReadonlyContainedOutput $root $output); Root=$root; Output=$output }
+            } $case
+            Assert-True ($result.Inside -eq $case.Inside) $case.Name
+            if ($case.Root -eq 'C:\') { Assert-True ($result.Root -ceq 'C:\') 'drive root preserved' }
+            if ($case.Root.StartsWith('\\')) { Assert-True ($result.Root.StartsWith('\\')) 'UNC leading separators preserved' }
+        }
+    }
+    # Exercise the real launcher and containment function, while replacing all
+    # filesystem access/native boundaries. Rejection must happen at containment,
+    # before any venv/config checks, helper, PAC, CLI or output publication.
+    $launcherCases = @(
+        @{Name='drive root equal'; Root='C:\'; Output='C:\'; Inside=$true},
+        @{Name='drive root child'; Root='C:\'; Output='C:\Exports'; Inside=$true},
+        @{Name='UNC root equal'; Root='\\files.example.invalid\share\'; Output='\\files.example.invalid\share\'; Inside=$true},
+        @{Name='UNC root child'; Root='\\files.example.invalid\share\'; Output='\\files.example.invalid\share\Exports'; Inside=$true},
+        @{Name='normal repository equal'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine'; Inside=$true},
+        @{Name='normal repository child'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine\Exports'; Inside=$true},
+        @{Name='different drive'; Root='C:\'; Output='D:\Exports'; Inside=$false},
+        @{Name='different UNC share'; Root='\\files.example.invalid\share\'; Output='\\files.example.invalid\other\Exports'; Inside=$false},
+        @{Name='sibling folder'; Root='C:\Tools\redmine'; Output='C:\Tools\other'; Inside=$false},
+        @{Name='similar repository prefix'; Root='C:\Tools\redmine'; Output='C:\Tools\redmine-other\Exports'; Inside=$false}
+    )
+    foreach ($case in $launcherCases) {
+        Test-Case ('launcher containment boundary: ' + $case.Name) {
+            $marker = Join-Path $temporary 'mock-output.txt'
+            & $module {
+                param($Marker, $Compare)
+                $script:state.containment = 0
+                $script:state.filesystem = 0
+                $script:state.marker = $Marker
+                $script:actualContainment = $Compare
+                function script:Test-ReadonlyContainedOutput {
+                    param($Root, $Output)
+                    $script:state.containment++
+                    $script:state.rootAtContainment = $Root
+                    $script:state.inside = & $script:actualContainment $Root $Output
+                    return $script:state.inside
+                }
+                function script:Join-Path { param($Path, $ChildPath) return [IO.Path]::Combine($Path, $ChildPath) }
+                function script:Test-Path {
+                    param($LiteralPath, $PathType)
+                    $script:state.filesystem++
+                    return $true
+                }
+                function script:Invoke-ReadonlyCli {
+                    param($Python, $Arguments)
+                    $script:state.cli++
+                    $script:state.python = $Python
+                    [IO.File]::WriteAllText($script:state.marker, 'mock CLI output')
+                    return 0
+                }
+            } $marker $originals['Test-ReadonlyContainedOutput']
+            $writer = New-Object IO.StringWriter
+            $previous = [Console]::Error
+            try {
+                [Console]::SetError($writer)
+                $code = Invoke-ReadonlyLauncher $case.Root @{Command='export'; ProxyMode='System'; Project='42'; OutputDir=$case.Output}
+                $s = State
+                Assert-True ($s.containment -eq 1 -and $s.inside -eq $case.Inside) 'real containment decision reached'
+                if ($case.Inside) {
+                    Assert-True ($code -eq 3 -and $writer.ToString() -eq ('ERROR: launcher input failed' + [Environment]::NewLine)) 'containment input rejection'
+                    Assert-True ($s.filesystem -eq 0 -and $s.helper -eq 0 -and $s.pac -eq 0 -and $s.cli -eq 0) 'no later boundaries called'
+                    Assert-True (-not (Test-Path -LiteralPath $marker)) 'no output file created'
+                } else {
+                    Assert-True ($code -eq 0 -and $s.filesystem -eq 3 -and $s.helper -eq 2 -and $s.pac -eq 1 -and $s.cli -eq 1) 'external output still runs CLI'
+                    Assert-True (Test-Path -LiteralPath $marker) 'mock CLI output reached'
+                    Assert-True ($s.python -ceq [IO.Path]::Combine($s.rootAtContainment, '.venv\Scripts\python.exe')) 'real root path retained'
+                }
+                if ($case.Root -eq 'C:\') { Assert-True ($s.rootAtContainment -ceq 'C:\') 'launcher drive root preserved' }
+                if ($case.Root.StartsWith('\\')) { Assert-True ($s.rootAtContainment.StartsWith('\\')) 'launcher UNC root preserved' }
+            } finally {
+                [Console]::SetError($previous)
+                & $module { Remove-Item Function:script:Join-Path, Function:script:Test-Path -ErrorAction Stop }
+                if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+            }
+        }
     }
     foreach ($file in @('config.toml', '.venv\Scripts\python.exe', 'src\redmine_readonly\windows_launcher.py')) {
         Test-Case ('missing ' + $file) {
