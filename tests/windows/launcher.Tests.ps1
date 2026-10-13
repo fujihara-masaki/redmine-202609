@@ -244,16 +244,27 @@ try {
         Copy-Item -LiteralPath (Join-Path $repo 'src') -Destination $integration -Recurse
         Copy-Item -LiteralPath (Join-Path $repo 'pyproject.toml'), (Join-Path $repo 'README.md') -Destination $integration
         $python = Join-Path $repo '.venv\Scripts\python.exe'
-        & $python -m venv --system-site-packages (Join-Path $integration '.venv')
+        # A nested --system-site-packages venv sees the base Python's packages,
+        # not the calling venv's packages. Discover the calling venv's package
+        # directories explicitly, then add them after the copied fixture source.
+        $parentSitesPath = Join-Path $temporary 'parent-sites.py'
+        [IO.File]::WriteAllText($parentSitesPath, 'import json,site; print(json.dumps(site.getsitepackages(),ensure_ascii=True))', [Text.Encoding]::ASCII)
+        $parentSitesText = & $python -I $parentSitesPath
+        if ($LASTEXITCODE -ne 0) { throw 'parent package directory discovery failed' }
+        $parentSites = @($parentSitesText | ConvertFrom-Json -ErrorAction Stop)
+        if ($parentSites.Count -eq 0) { throw 'parent package directories missing' }
+        & $python -m venv --without-pip (Join-Path $integration '.venv')
         if ($LASTEXITCODE -ne 0) { throw 'integration venv setup failed' }
         $childPython = Join-Path $integration '.venv\Scripts\python.exe'
         # The dedicated fixture shadows only the source modules. Reuse installed
-        # Requests without downloading/building any packages during the test.
-        # An ASCII .pth line also works on 5.1/3.11 with non-ASCII root paths.
-        $source = (Join-Path $integration 'src') | ConvertTo-Json -Compress
+        # Requests without installing packages or processing the parent's .pth
+        # files, which could point editable source back to the real repository.
+        # ASCII JSON string literals work on 5.1/3.11/3.12 with Unicode paths.
+        $importPaths = @((Join-Path $integration 'src')) + $parentSites
+        $source = ConvertTo-Json -InputObject $importPaths -Compress
         $source = [regex]::Replace($source, '[^\x00-\x7f]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
         $pth = Join-Path $integration '.venv\Lib\site-packages\launcher-fixture.pth'
-        [IO.File]::WriteAllText($pth, ('import sys; sys.path.insert(0, ' + $source + ')' + [Environment]::NewLine), [Text.Encoding]::ASCII)
+        [IO.File]::WriteAllText($pth, ('import sys; sys.path[:0] = ' + $source + [Environment]::NewLine), [Text.Encoding]::ASCII)
         # This probe prints only fixed flags from the synthetic fixture. It
         # does not import the helper (which imports Requests before main).
         $probeCode = 'import importlib.util,json,pathlib,sys; root=pathlib.Path(sys.argv[1]).resolve(); spec=importlib.util.find_spec("redmine_readonly.windows_launcher"); print(json.dumps(dict(requests_available=importlib.util.find_spec("requests") is not None, prefix_matches=pathlib.Path(sys.prefix).resolve()==root/".venv", source_matches=spec is not None and pathlib.Path(spec.origin).resolve()==root/"src/redmine_readonly/windows_launcher.py")))'
@@ -265,6 +276,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'fixture probe failed' }
         $probe = $probeText | ConvertFrom-Json -ErrorAction Stop
         Write-Host ('TEST-FIXTURE: requests_available=' + $probe.requests_available + '; prefix_matches=' + $probe.prefix_matches + '; source_matches=' + $probe.source_matches)
+        Assert-True ($probe.requests_available -and $probe.prefix_matches -and $probe.source_matches) 'isolated fixture dependencies and source reference'
+        $script:count++
+        Write-Host 'PASS: isolated fixture imports parent dependencies with -I and matching root/source'
         $config = Join-Path $integration '設定 (sample).toml'
         Set-Content -LiteralPath $config -Value 'base_url="https://redmine.example.invalid/redmine"' -Encoding UTF8
         # Windows PS UTF8 writes BOM; TOML fixture must be UTF8 without BOM.

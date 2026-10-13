@@ -162,8 +162,11 @@ Requests timeoutはPAC評価全体の時間上限ではない。helper自体はH
 追加PythonテストはHTTPを拒否してURL・URI・Requests実効選択を検査する。
 `tests/windows/launcher.Tests.ps1` は追加依存なし。Windows CIでは `shell: powershell` で
 Desktop 5.1を要求して実スクリプト/内部関数を実行し、件数不足やskipだけの成功を拒否する。
-CIの一時venvは導入済みpackage/Requestsを再利用し、fixture内だけのsource参照を設定する。
-テスト中の追加pip installやネットワーク取得は不要で、利用者の起動時依存も増やさない。
+CIはPython 3.11と3.12のWindowsで、依存をグローバルではなくrepositoryのvenv内へ導入する。
+fixtureは独立venvを作り、コピーしたsourceを先頭、親venvのsite-packagesを後へ明示参照する。
+`venv --system-site-packages` は親venv内の依存を継承せず、base Pythonの依存を参照するため使わない。
+`-I` とhelperのroot/source検証は維持し、fixtureの参照・依存をAPI実行前に固定フラグで検査する。
+テスト中の追加pip installやネットワーク取得は不要で、社内PCの設定や利用者の起動時依存も増やさない。
 PACと本体CLIを架空境界へ差し替え、専用子プロセスで実引数・環境・stdout/stderr・復元・終了を検査する。
 
 ```powershell
