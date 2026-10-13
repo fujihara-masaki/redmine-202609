@@ -284,7 +284,11 @@ try {
                 if ($case.Root.StartsWith('\\')) { Assert-True ($s.rootAtContainment.StartsWith('\\')) 'launcher UNC root preserved' }
             } finally {
                 [Console]::SetError($previous)
-                & $module { Remove-Item Function:script:Join-Path, Function:script:Test-Path -ErrorAction Stop }
+                & $module {
+                    Remove-Item Function:Join-Path, Function:Test-Path -ErrorAction Stop
+                    if ((Get-Command Join-Path).CommandType -ne 'Cmdlet' -or
+                        (Get-Command Test-Path).CommandType -ne 'Cmdlet') { throw 'filesystem mock cleanup failed' }
+                }
                 if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
             }
         }
