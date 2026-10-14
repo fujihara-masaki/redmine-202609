@@ -25,7 +25,7 @@ publicリポジトリを前提に秘密・実データを残さず、変更操�
 `GET /projects/{id_or_identifier}.json` だけです。変更候補生成、変更系API、個別issue endpointは
 追加せず、PR-2の計画も変更しません。
 
-## PR-1.2: extended standard fields（今回）
+## PR-1.2: extended standard fields
 
 - 既定のbasicを完全に維持し、明示 `--fields extended` だけで標準10項目を固定許可リスト出力
 - 欠損/null/非null値をJSONと値なしmetadata集計で区別し、型・範囲・長さを安全に検証
@@ -33,6 +33,18 @@ publicリポジトリを前提に秘密・実データを残さず、変更操�
 - QUICK2での返却shape、権限差、GUIとの業務的対応は未確認で、マージ後に承認済み少数件で確認
 
 許可GET endpointと検索条件を増やさず、本文、custom field、個別issue情報、変更候補は対象外とする。
+
+## PR-1.3: Windows・VPN環境での起動とプロキシ手順の整備
+
+- Windows PowerShell 5.1の固定パラメータ起動補助。配置場所のvenv/configを使用
+- 既定Inheritは従来のRequests選択を保持。明示Systemだけ対象URLのWindows/.NET選択を利用
+- load_configとRequestsのmerge/selectを再利用するキー不要の内部helperで、認証前に実効選択を照合
+- ProcessのHTTPS_PROXYだけを一時変更しtry/finallyで復元。競合・判定失敗・cleanup失敗は安全に停止
+- 初回・日常・更新・再起動・VPN・ExecutionPolicyの手順と、Windows Desktop 5.1のmock/子プロセステスト
+
+既存GET、schema、抽出条件、run公開を維持する。PAC取得等のOS通信はAPI処理と別。
+複雑なPAC/failoverや資格情報自動送信は対象外。利用者の既存CLI実測と、新wrapperの自動検証、
+未実施のQUICK2実機確認を区別する。PR-2以降の目的は変更しない。
 
 ## PR-2: 変更候補の作成（計画のみ）
 

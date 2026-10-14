@@ -12,22 +12,43 @@ permissions:
 jobs:
   checks:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+            venv-python: ./.venv/bin/python
+          - os: windows-latest
+            python-version: "3.11"
+            venv-python: ./.venv/Scripts/python.exe
+          - os: windows-latest
+            python-version: "3.12"
+            venv-python: ./.venv/Scripts/python.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install -e ".[test]"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          ${{ matrix.venv-python }} -m pip install -e ".[test]"
       - name: Run tests
-        run: python -m pytest
+        run: ${{ matrix.venv-python }} -m pytest
       - name: Run Ruff lint
-        run: ruff check .
+        run: ${{ matrix.venv-python }} -m ruff check .
       - name: Check Ruff formatting
-        run: ruff format --check .
+        run: ${{ matrix.venv-python }} -m ruff format --check .
       - name: Compile Python sources
-        run: python -m compileall -q src tests
+        run: ${{ matrix.venv-python }} -m compileall -q src tests
+      - name: Test launcher on Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\windows\launcher.Tests.ps1
+          if (-not $?) { throw 'Windows launcher tests failed' }
