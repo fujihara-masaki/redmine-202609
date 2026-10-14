@@ -373,14 +373,26 @@ try {
             & $module { param($Resolver) Set-Item Function:script:Resolve-ReadonlyFinalDirectory $Resolver } $originals['Resolve-ReadonlyFinalDirectory']
         }
         function Assert-OutputRejected {
-            param([string] $Root, [string] $Output)
+            param([string] $Root, [string] $Output, [switch] $AllowLexical)
             $writer = New-Object IO.StringWriter
             $previous = [Console]::Error
             try {
                 [Console]::SetError($writer)
                 $code = Invoke-ReadonlyLauncher $Root @{Command='export'; ProxyMode='System'; Project='42'; OutputDir=$Output}
             } finally { [Console]::SetError($previous) }
-            Assert-True ($code -eq 3 -and $writer.ToString() -eq ('ERROR: launcher output-path failed' + [Environment]::NewLine)) 'physical containment/resolution rejects before setup'
+            $expected = 'ERROR: launcher output-path failed' + [Environment]::NewLine
+            if ($AllowLexical) {
+                # .NET Framework can already expand existing short names in
+                # GetFullPath. Accept input rejection only after proving that
+                # this exact normalized pair is lexically contained.
+                $inside = & $module {
+                    param($Root, $Output)
+                    Test-ReadonlyContainedOutput (Resolve-ReadonlyPath $Root $Root) (Resolve-ReadonlyPath $Output $Root)
+                } $Root $Output
+                if ($inside) { $expected = 'ERROR: launcher input failed' + [Environment]::NewLine }
+                Write-Host ('SHORT-NAME: normalized_containment=' + $inside)
+            }
+            Assert-True ($code -eq 3 -and $writer.ToString() -eq $expected) 'containment/resolution rejects before setup'
             $s = State
             Assert-True ($s.helper -eq 0 -and $s.pac -eq 0 -and $s.cli -eq 0 -and $s.restore -eq 0) 'no helper PAC CLI or environment change'
         }
@@ -489,7 +501,8 @@ try {
             Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture 'race-output'))) 'no raced output'
         }
         # Optional capability: never change 8.3 policy or symlink privileges.
-        Add-Type -TypeDefinition @'
+        if (-not ('LauncherTestShortPath' -as [type])) {
+            Add-Type -TypeDefinition @'
 using System.Text;
 using System.Runtime.InteropServices;
 public static class LauncherTestShortPath {
@@ -497,6 +510,7 @@ public static class LauncherTestShortPath {
     public static extern uint GetShortPathNameW(string path, StringBuilder result, uint size);
 }
 '@
+        }
         $longRoot = Join-Path $temporary 'long repository name for short path'
         $null = New-Item -ItemType Directory -Path $longRoot
         $shortBuffer = New-Object Text.StringBuilder(32768)
@@ -506,7 +520,14 @@ public static class LauncherTestShortPath {
             foreach ($pair in @(@($longRoot, $shortRoot), @($longRoot, ($shortRoot + '\missing\nested')), @($shortRoot, ($longRoot + '\missing')))) {
                 Test-Case 'real 8.3 alias rejected' {
                     Use-RealFinalResolver
-                    Assert-OutputRejected $pair[0] $pair[1]
+                    Assert-OutputRejected $pair[0] $pair[1] -AllowLexical
+                    # Also exercise final-handle resolution directly, even if
+                    # GetFullPath expanded this alias before launcher checks.
+                    $inside = & $module {
+                        param($Root, $Output)
+                        Test-ReadonlyContainedOutput (Resolve-ReadonlyFinalDirectory $Root $false) (Resolve-ReadonlyFinalDirectory $Output $true)
+                    } $pair[0] $pair[1]
+                    Assert-True $inside 'native resolver equates real 8.3 alias'
                     Assert-True (-not (Test-Path -LiteralPath (Join-Path $longRoot 'missing'))) 'no short-name output created'
                 }
             }
