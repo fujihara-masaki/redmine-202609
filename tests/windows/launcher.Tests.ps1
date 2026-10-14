@@ -22,12 +22,13 @@ $originals = & $module {
     $saved = @{}
     foreach ($name in @('Invoke-ReadonlyHelper', 'Get-ReadonlySystemProxy', 'Invoke-ReadonlyCli',
         'Get-ReadonlyEnvironment', 'Set-ReadonlyEnvironment', 'Restore-ReadonlyEnvironment',
-        'Test-ReadonlyContainedOutput')) {
+        'Test-ReadonlyContainedOutput', 'Resolve-ReadonlyFinalDirectory')) {
         $saved[$name] = (Get-Item ('Function:' + $name)).ScriptBlock
     }
     return $saved
 }
 $script:count = 0
+$script:testLinks = @()
 function Assert-True {
     param($Condition, [string] $Description = 'assertion')
     if (-not $Condition) { throw ('FAILED: ' + $Description) }
@@ -68,6 +69,8 @@ function Test-Case {
             if ($script:state.failCli) { throw 'FAKE-SECRET simulated interruption' }
             return $script:state.code
         }
+        # String-only unit cases must never touch fictional drives/shares.
+        function script:Resolve-ReadonlyFinalDirectory { param($Path, $AllowMissing) return $Path }
         function script:Get-ReadonlyEnvironment { return $script:state.snapshot.Clone() }
         function script:Set-ReadonlyEnvironment { param($Value) $script:state.environment = $Value }
         function script:Restore-ReadonlyEnvironment {
@@ -85,35 +88,6 @@ function Test-Case {
 function State { return (& $module { return $script:state }) }
 function Launch { param([hashtable] $Options) return (Invoke-ReadonlyLauncher $fixture $Options) }
 try {
-    if (-not $AllowPowerShell7) {
-        Test-Case 'filesystem alias reproduction on real Windows' {
-            $alias = Join-Path $temporary 'outside junction'
-            $output = Join-Path $alias 'alias-repro'
-            $actual = Join-Path $fixture 'alias-repro'
-            try {
-                $null = New-Item -ItemType Junction -Path $alias -Target $fixture
-                $lexicalInside = & $module { param($Root, $Output) Test-ReadonlyContainedOutput $Root ([IO.Path]::GetFullPath($Output)) } $fixture $output
-                $resolvedInside = & $module { param($Root, $Output) Test-ReadonlyContainedOutput $Root $Output } $fixture (Resolve-Path -LiteralPath $alias).ProviderPath
-                Assert-True (-not $lexicalInside) 'GetFullPath leaves junction outside'
-                (State).reproOutput = $output
-                & $module {
-                    function script:Invoke-ReadonlyCli {
-                        param($Python, $Arguments)
-                        $script:state.cli++
-                        $null = [IO.Directory]::CreateDirectory($script:state.reproOutput)
-                        [IO.File]::WriteAllText((Join-Path $script:state.reproOutput 'fictional.csv'), 'fictional data only')
-                        return 0
-                    }
-                }
-                Assert-True ((Launch @{Command='export'; Project='42'; OutputDir=$output}) -eq 0) 'old launcher accepts alias'
-                Assert-True (Test-Path -LiteralPath (Join-Path $actual 'fictional.csv')) 'alias write enters repository fixture'
-                Write-Host ('REPRO: GetFullPath_inside=' + $lexicalInside + '; ResolvePath_inside=' + $resolvedInside + '; actual_write_inside=True')
-            } finally {
-                if (Test-Path -LiteralPath $alias) { [IO.Directory]::Delete($alias) }
-                if (Test-Path -LiteralPath $actual) { Remove-Item -LiteralPath $actual -Recurse -Force }
-            }
-        }
-    }
     Test-Case 'Inherit defaults preserve settings without PAC' {
         Assert-True ((Launch @{ Command = 'check' }) -eq 0)
         $s = State
@@ -299,7 +273,8 @@ try {
                 [Console]::SetError($writer)
                 $code = Invoke-ReadonlyLauncher $case.Root @{Command='export'; ProxyMode='System'; Project='42'; OutputDir=$case.Output}
                 $s = State
-                Assert-True ($s.containment -eq 1 -and $s.inside -eq $case.Inside) 'real containment decision reached'
+                $expectedComparisons = 1; if (-not $case.Inside) { $expectedComparisons = 3 }
+                Assert-True ($s.containment -eq $expectedComparisons -and $s.inside -eq $case.Inside) 'real containment decision reached'
                 if ($case.Inside) {
                     Assert-True ($code -eq 3 -and $writer.ToString() -eq ('ERROR: launcher input failed' + [Environment]::NewLine)) 'containment input rejection'
                     Assert-True ($s.filesystem -eq 0 -and $s.helper -eq 0 -and $s.pac -eq 0 -and $s.cli -eq 0) 'no later boundaries called'
@@ -379,6 +354,176 @@ try {
             'export','--project','42','--output-dir','C:\架空 (exports)','--fields','extended',
             '--status=*','--tracker','2','--include-subprojects','--include-jst-columns')
         Assert-True (($actual | ConvertTo-Json -Compress) -eq ($expected | ConvertTo-Json -Compress))
+    }
+
+    if (-not $AllowPowerShell7) {
+        # Actual filesystem aliases exist only below this test's temp directory.
+        # Helpers/PAC/CLI stay mocked; no API, share, real repository output.
+        $insideData = Join-Path $fixture 'existing data (架空)'
+        $outsideData = Join-Path $temporary 'external data (架空)'
+        $null = New-Item -ItemType Directory -Path $insideData, $outsideData
+        $insideAlias = Join-Path $temporary 'repository junction'
+        $childAlias = Join-Path $temporary 'child junction'
+        $outsideAlias = Join-Path $temporary 'external junction'
+        foreach ($pair in @(@($insideAlias, $fixture), @($childAlias, $insideData), @($outsideAlias, $outsideData))) {
+            $null = New-Item -ItemType Junction -Path $pair[0] -Target $pair[1]
+            $script:testLinks += $pair[0]
+        }
+        function Use-RealFinalResolver {
+            & $module { param($Resolver) Set-Item Function:script:Resolve-ReadonlyFinalDirectory $Resolver } $originals['Resolve-ReadonlyFinalDirectory']
+        }
+        function Assert-OutputRejected {
+            param([string] $Root, [string] $Output)
+            $writer = New-Object IO.StringWriter
+            $previous = [Console]::Error
+            try {
+                [Console]::SetError($writer)
+                $code = Invoke-ReadonlyLauncher $Root @{Command='export'; ProxyMode='System'; Project='42'; OutputDir=$Output}
+            } finally { [Console]::SetError($previous) }
+            Assert-True ($code -eq 3 -and $writer.ToString() -eq ('ERROR: launcher output-path failed' + [Environment]::NewLine)) 'physical containment/resolution rejects before setup'
+            $s = State
+            Assert-True ($s.helper -eq 0 -and $s.pac -eq 0 -and $s.cli -eq 0 -and $s.restore -eq 0) 'no helper PAC CLI or environment change'
+        }
+        Test-Case 'junction bypass reproduction now refused' {
+            Use-RealFinalResolver
+            $output = Join-Path $insideAlias 'alias-repro'
+            $lexicalInside = & $module { param($Root, $Output) Test-ReadonlyContainedOutput $Root ([IO.Path]::GetFullPath($Output)) } $fixture $output
+            $resolvedInside = & $module { param($Root, $Output) Test-ReadonlyContainedOutput $Root $Output } $fixture (Resolve-Path -LiteralPath $insideAlias).ProviderPath
+            Assert-True (-not $lexicalInside -and -not $resolvedInside) 'GetFullPath and Resolve-Path retain the alias'
+            Assert-OutputRejected $fixture $output
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture 'alias-repro'))) 'no output directory or files created'
+        }
+        $aliasCases = @(
+            @{Name='junction equal'; Root=$fixture; Output=$insideAlias},
+            @{Name='junction existing child'; Root=$fixture; Output=(Join-Path $insideAlias 'existing data (架空)')},
+            @{Name='junction missing descendants'; Root=$fixture; Output=(Join-Path $insideAlias 'missing\nested')},
+            @{Name='repository alias equal'; Root=$insideAlias; Output=$fixture},
+            @{Name='repository alias existing child'; Root=$insideAlias; Output=$insideData},
+            @{Name='repository alias missing child'; Root=$insideAlias; Output=(Join-Path $fixture 'missing\nested')},
+            @{Name='both paths aliases'; Root=$insideAlias; Output=(Join-Path $childAlias 'missing\nested')},
+            @{Name='case dots and trailing separator'; Root=$insideAlias.ToUpperInvariant(); Output=($childAlias + '\.\missing\..\new\')}
+        )
+        foreach ($case in $aliasCases) {
+            Test-Case ('physical containment: ' + $case.Name) {
+                Use-RealFinalResolver
+                Assert-OutputRejected $case.Root $case.Output
+                Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture 'missing'))) 'missing descendants remain absent'
+                Assert-True (-not (Test-Path -LiteralPath (Join-Path $insideData 'new'))) 'dot path did not create output'
+            }
+        }
+        foreach ($output in @($outsideData, $outsideAlias, (Join-Path $outsideAlias 'missing\nested'), ($fixture + '-other\new'))) {
+            Test-Case 'real external output still accepted without creating it' {
+                Use-RealFinalResolver
+                $existed = Test-Path -LiteralPath $output
+                Assert-True ((Invoke-ReadonlyLauncher $insideAlias @{Command='export'; ProxyMode='System'; Project='42'; OutputDir=$output}) -eq 0)
+                $s = State
+                Assert-True ($s.helper -eq 2 -and $s.pac -eq 1 -and $s.cli -eq 1 -and $s.restore -eq 1)
+                Assert-True ($s.args[9] -ceq $output) 'original normalized CLI output argument retained'
+                Assert-True ((Test-Path -LiteralPath $output) -eq $existed) 'validation never creates output'
+            }
+        }
+        Test-Case 'dangling junction is unresolved rather than absent' {
+            Use-RealFinalResolver
+            $gone = Join-Path $temporary 'target to remove'
+            $broken = Join-Path $temporary 'dangling junction'
+            $null = New-Item -ItemType Directory -Path $gone
+            $null = New-Item -ItemType Junction -Path $broken -Target $gone
+            $script:testLinks += $broken
+            [IO.Directory]::Delete($gone)
+            Assert-OutputRejected $fixture (Join-Path $broken 'missing\nested')
+            Assert-True (-not (Test-Path -LiteralPath $gone)) 'broken target not recreated'
+        }
+        Test-Case 'existing file is not an output directory' {
+            Use-RealFinalResolver
+            $file = Join-Path $temporary 'not a directory'
+            [IO.File]::WriteAllText($file, 'fictional')
+            Assert-OutputRejected $fixture $file
+            Assert-True ([IO.File]::ReadAllText($file) -eq 'fictional')
+        }
+        Test-Case 'missing repository cannot be assumed external' {
+            Use-RealFinalResolver
+            Assert-OutputRejected (Join-Path $temporary 'absent repository') $outsideData
+        }
+        foreach ($failure in @('root', 'output')) {
+            Test-Case ('resolution failure is closed and redacted: ' + $failure) {
+                (State).resolveCalls = 0
+                (State).failResolveAt = 1; if ($failure -eq 'output') { (State).failResolveAt = 2 }
+                & $module {
+                    function script:Resolve-ReadonlyFinalDirectory {
+                        param($Path, $AllowMissing)
+                        $script:state.resolveCalls++
+                        if ($script:state.resolveCalls -eq $script:state.failResolveAt) { throw 'FAKE-SECRET inaccessible path' }
+                        return $Path
+                    }
+                }
+                Assert-OutputRejected $fixture $outsideData
+            }
+        }
+        Test-Case 'retarget observed after preflight stops CLI and restores environment' {
+            Use-RealFinalResolver
+            $changing = Join-Path $temporary 'changing junction'
+            $null = New-Item -ItemType Junction -Path $changing -Target $outsideData
+            $script:testLinks += $changing
+            (State).changing = $changing
+            (State).newTarget = $fixture
+            & $module {
+                function script:Invoke-ReadonlyHelper {
+                    param($Python, $Message)
+                    $script:state.helper++
+                    if ($Message.stage -eq 'target') {
+                        [IO.Directory]::Delete($script:state.changing)
+                        $null = New-Item -ItemType Junction -Path $script:state.changing -Target $script:state.newTarget
+                        return @{url=$script:state.target}
+                    }
+                    return @{ok=$true}
+                }
+            }
+            $writer = New-Object IO.StringWriter; $previous = [Console]::Error
+            try {
+                [Console]::SetError($writer)
+                $code = Launch @{Command='export'; ProxyMode='System'; Project='42'; OutputDir=(Join-Path $changing 'race-output')}
+            } finally { [Console]::SetError($previous) }
+            $s = State
+            Assert-True ($code -eq 3 -and $writer.ToString() -eq ('ERROR: launcher output-path failed' + [Environment]::NewLine))
+            Assert-True ($s.helper -eq 2 -and $s.pac -eq 1 -and $s.cli -eq 0 -and $s.restore -eq 1 -and $s.environment -eq $s.snapshot.Value)
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture 'race-output'))) 'no raced output'
+        }
+        # Optional capability: never change 8.3 policy or symlink privileges.
+        Add-Type -TypeDefinition @'
+using System.Text;
+using System.Runtime.InteropServices;
+public static class LauncherTestShortPath {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    public static extern uint GetShortPathNameW(string path, StringBuilder result, uint size);
+}
+'@
+        $longRoot = Join-Path $temporary 'long repository name for short path'
+        $null = New-Item -ItemType Directory -Path $longRoot
+        $shortBuffer = New-Object Text.StringBuilder(32768)
+        $shortLength = [LauncherTestShortPath]::GetShortPathNameW($longRoot, $shortBuffer, 32768)
+        $shortRoot = $shortBuffer.ToString()
+        if ($shortLength -gt 0 -and $shortLength -lt 32768 -and -not $shortRoot.Equals($longRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            foreach ($pair in @(@($longRoot, $shortRoot), @($longRoot, ($shortRoot + '\missing\nested')), @($shortRoot, ($longRoot + '\missing')))) {
+                Test-Case 'real 8.3 alias rejected' {
+                    Use-RealFinalResolver
+                    Assert-OutputRejected $pair[0] $pair[1]
+                    Assert-True (-not (Test-Path -LiteralPath (Join-Path $longRoot 'missing'))) 'no short-name output created'
+                }
+            }
+            Write-Host 'CAPABILITY: distinct 8.3 alias tested'
+        } else { Write-Host 'UNVERIFIED: distinct 8.3 short names unavailable; no policy changes made' }
+        $symbolic = Join-Path $temporary 'optional symbolic link'
+        $symbolicCreated = $false
+        try { $null = New-Item -ItemType SymbolicLink -Path $symbolic -Target $fixture; $symbolicCreated = $true } catch { }
+        if ($symbolicCreated) {
+            $script:testLinks += $symbolic
+            Test-Case 'real symbolic link missing child rejected' {
+                Use-RealFinalResolver
+                Assert-OutputRejected $fixture (Join-Path $symbolic 'symbolic-output')
+                Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture 'symbolic-output')))
+            }
+            Write-Host 'CAPABILITY: symbolic link tested'
+        } else { Write-Host 'UNVERIFIED: symbolic link creation unavailable; no privilege changes made' }
     }
     # Restore actual boundaries for child-process integration.
     & $module { param($Saved) foreach ($name in $Saved.Keys) { Set-Item ('Function:script:' + $name) $Saved[$name] } } $originals
@@ -544,8 +689,10 @@ exit $code
         Write-Host 'PASS: real helper failure is safe and prevents CLI'
     }
     if ($script:count -lt 50) { throw 'too few tests; refusing empty/skip success' }
-    Write-Host ('Windows launcher tests: ' + $script:count + ' passed; 0 skipped')
+    Write-Host ('Windows launcher tests: ' + $script:count + ' passed; 0 required cases skipped; optional capabilities reported separately')
 } finally {
+    # Remove links non-recursively before recursive fixture cleanup.
+    foreach ($link in $script:testLinks) { [IO.Directory]::Delete($link) }
     Remove-Module RedmineReadonly.Launcher -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop
 }

@@ -137,6 +137,23 @@ function Test-ReadonlyContainedOutput {
         $outputComparison.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase))
 }
 
+function Resolve-ReadonlyFinalDirectory {
+    param([string] $Path, [bool] $AllowMissing)
+    try {
+        if (-not ('RedmineReadonly.FinalDirectoryPath' -as [type])) {
+            Add-Type -Path (Join-Path $PSScriptRoot 'ReadonlyFinalPath.cs') -ErrorAction Stop
+        }
+        return [RedmineReadonly.FinalDirectoryPath]::Resolve($Path, $AllowMissing)
+    } catch { throw 'output path validation failed' }
+}
+
+function Assert-ReadonlyExternalOutput {
+    param([string] $Root, [string] $Output)
+    $finalRoot = Resolve-ReadonlyFinalDirectory $Root $false
+    $finalOutput = Resolve-ReadonlyFinalDirectory $Output $true
+    if (Test-ReadonlyContainedOutput $finalRoot $finalOutput) { throw 'output path validation failed' }
+}
+
 function Invoke-ReadonlyLauncher {
     param([string] $Root, [hashtable] $Options)
     $code = 3
@@ -185,6 +202,10 @@ function Invoke-ReadonlyLauncher {
             if ($o.ContainsKey('IncludeSubprojects') -and $o.IncludeSubprojects) { $cliArgs += '--include-subprojects' }
             if ($o.ContainsKey('IncludeJstColumns') -and $o.IncludeJstColumns) { $cliArgs += '--include-jst-columns' }
         }
+        if ($o.Command -eq 'export') {
+            $classification = 'output-path'
+            Assert-ReadonlyExternalOutput $Root $output
+        }
         $classification = 'setup'
         $python = Join-Path $Root '.venv\Scripts\python.exe'
         foreach ($file in @($python, $config, (Join-Path $Root 'src\redmine_readonly\windows_launcher.py'))) {
@@ -212,6 +233,12 @@ function Invoke-ReadonlyLauncher {
             Write-Host ('ProxyMode=System; ' + $decision.Kind)
         } else {
             Write-Host 'ProxyMode=Inherit'
+        }
+        if ($o.Command -eq 'export') {
+            # Catch changes observed during preflight. This is not an atomic
+            # guarantee against retargeting after this check / during CLI IO.
+            $classification = 'output-path'
+            Assert-ReadonlyExternalOutput $Root $output
         }
         $classification = 'launch'
         $code = Invoke-ReadonlyCli $python $cliArgs
