@@ -85,6 +85,35 @@ function Test-Case {
 function State { return (& $module { return $script:state }) }
 function Launch { param([hashtable] $Options) return (Invoke-ReadonlyLauncher $fixture $Options) }
 try {
+    if (-not $AllowPowerShell7) {
+        Test-Case 'filesystem alias reproduction on real Windows' {
+            $alias = Join-Path $temporary 'outside junction'
+            $output = Join-Path $alias 'alias-repro'
+            $actual = Join-Path $fixture 'alias-repro'
+            try {
+                $null = New-Item -ItemType Junction -Path $alias -Target $fixture
+                $lexicalInside = & $module { param($Root, $Output) Test-ReadonlyContainedOutput $Root ([IO.Path]::GetFullPath($Output)) } $fixture $output
+                $resolvedInside = & $module { param($Root, $Output) Test-ReadonlyContainedOutput $Root $Output } $fixture (Resolve-Path -LiteralPath $alias).ProviderPath
+                Assert-True (-not $lexicalInside) 'GetFullPath leaves junction outside'
+                (State).reproOutput = $output
+                & $module {
+                    function script:Invoke-ReadonlyCli {
+                        param($Python, $Arguments)
+                        $script:state.cli++
+                        $null = [IO.Directory]::CreateDirectory($script:state.reproOutput)
+                        [IO.File]::WriteAllText((Join-Path $script:state.reproOutput 'fictional.csv'), 'fictional data only')
+                        return 0
+                    }
+                }
+                Assert-True ((Launch @{Command='export'; Project='42'; OutputDir=$output}) -eq 0) 'old launcher accepts alias'
+                Assert-True (Test-Path -LiteralPath (Join-Path $actual 'fictional.csv')) 'alias write enters repository fixture'
+                Write-Host ('REPRO: GetFullPath_inside=' + $lexicalInside + '; ResolvePath_inside=' + $resolvedInside + '; actual_write_inside=True')
+            } finally {
+                if (Test-Path -LiteralPath $alias) { [IO.Directory]::Delete($alias) }
+                if (Test-Path -LiteralPath $actual) { Remove-Item -LiteralPath $actual -Recurse -Force }
+            }
+        }
+    }
     Test-Case 'Inherit defaults preserve settings without PAC' {
         Assert-True ((Launch @{ Command = 'check' }) -eq 0)
         $s = State
