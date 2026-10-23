@@ -113,7 +113,7 @@ def run(argv: list[str] | None = None) -> int:
             if rules is not None:
                 counts = result.metadata["followup"]["counts"]
                 print(
-                    f"フォロー: 対象={counts['target']}, 対象外={counts['not_target']}, 判定不能={counts['indeterminate']}"
+                    f"Follow-up: target={counts['target']}, not_target={counts['not_target']}, indeterminate={counts['indeterminate']}"
                 )
             print(f"CSV: {csv_path}")
             print(f"JSON: {json_path}")

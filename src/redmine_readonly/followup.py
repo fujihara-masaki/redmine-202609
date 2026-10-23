@@ -264,13 +264,17 @@ def input_sha256(issues: list[dict[str, Any]]) -> str:
     snapshot = [
         {"issue_id": row["id"], "inputs": row["followup_inputs"]} for row in issues
     ]
-    raw = json.dumps(
+    canonical = json.dumps(
         snapshot,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
-    ).encode("utf-8")
+    )
+    try:
+        raw = canonical.encode("utf-8")
+    except UnicodeEncodeError:
+        raise AppError("cannot encode followup inputs as UTF-8") from None
     return hashlib.sha256(raw).hexdigest()
 
 

@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import io
 import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta
@@ -292,6 +293,67 @@ def cli_setup(tmp_path, monkeypatch, responses):
     return argv, output, session
 
 
+@pytest.mark.parametrize("encoding", ["ascii", "cp1252"])
+def test_followup_summary_on_ascii_only_stdout(tmp_path, monkeypatch, encoding):
+    items = [
+        raw_issue(1, incident="minor"),
+        raw_issue(2, incident="minor", status=5),
+        raw_issue(3, incident="unknown"),
+    ]
+    argv, output, _ = cli_setup(tmp_path, monkeypatch, [page(items, 3)])
+    rules_path = tmp_path / "rules.toml"
+    rules_path.write_text(
+        "schema_version = 1\n[fields]\n"
+        "incident_type_custom_field_id = 101\n"
+        "discovered_on_custom_field_id = 102\n"
+        "[statuses]\ncompleted_ids = [5]\n"
+        "[threshold_days]\nminor = 90\n",
+        encoding="ascii",
+    )
+    argv += ["--followup-config", str(rules_path), "--as-of", "2026-10-23"]
+    assert all(argument.isascii() for argument in argv)
+    with (
+        io.BytesIO() as buffer,
+        io.TextIOWrapper(
+            buffer, encoding=encoding, errors="strict", newline="\n"
+        ) as stream,
+    ):
+        with monkeypatch.context() as context:
+            context.setattr("sys.stdout", stream)
+            code = run(argv)
+        stream.flush()
+        text = buffer.getvalue().decode(encoding)
+    assert code == 0
+    assert "Follow-up: target=1, not_target=1, indeterminate=1\n" in text
+    run_dir = next(output.glob("run-*"))
+    assert f"CSV: {run_dir / 'issues.csv'}\n" in text
+    assert f"JSON: {run_dir / 'issues.json'}\n" in text
+    assert (run_dir / "issues.csv").is_file()
+    payload = json.loads((run_dir / "issues.json").read_text(encoding="utf-8"))
+    assert len(payload["issues"]) == 3
+
+
+@pytest.mark.parametrize("escape", [r"\ud800", r"\udfff"])
+def test_surrogate_input_hash_failure_is_safe_and_preserves_runs(
+    tmp_path, monkeypatch, capsys, escape
+):
+    # Decode the same escaped scalar that a JSON HTTP response can contain.
+    selected_value = json.loads('"PRIVATE_SELECTED' + escape + '"')
+    argv, output, _ = cli_setup(
+        tmp_path, monkeypatch, [page([raw_issue(incident=selected_value)], 1)]
+    )
+    existing = output / "run-existing"
+    existing.mkdir(parents=True)
+    marker = existing / "marker"
+    marker.write_text("keep", encoding="ascii")
+    assert run(argv + ["--followup-config", str(EXAMPLE)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "ERROR: cannot encode followup inputs as UTF-8\n"
+    assert list(output.iterdir()) == [existing]
+    assert marker.read_text(encoding="ascii") == "keep"
+
+
 @pytest.mark.parametrize(
     "options",
     [
@@ -418,7 +480,7 @@ def test_full_export_all_rows_columns_hashes_counts_and_get_only(
     assert [call[2]["params"]["offset"] for call in session.calls] == (
         [0] if empty else [0, 2]
     )
-    assert f"判定不能={0 if empty else 1}" in capsys.readouterr().out
+    assert f"indeterminate={0 if empty else 1}" in capsys.readouterr().out
 
 
 def test_default_as_of_is_captured_once_and_reproducible(tmp_path, monkeypatch):
