@@ -14,6 +14,8 @@ from typing import Any
 from .errors import AppError
 from .exporter import ExportResult
 from .fields import EXTENDED_CSV_COLUMNS
+from .followup import CSV_COLUMNS as FOLLOWUP_CSV_COLUMNS
+from .followup import csv_values
 
 CSV_COLUMNS = [
     "id",
@@ -40,7 +42,10 @@ def csv_safe(value: Any) -> Any:
 
 
 def _csv_row(
-    issue: dict[str, Any], include_jst_columns: bool, extended: bool = False
+    issue: dict[str, Any],
+    include_jst_columns: bool,
+    extended: bool = False,
+    followup: bool = False,
 ) -> dict[str, Any]:
     row = {
         "id": issue["id"],
@@ -78,6 +83,8 @@ def _csv_row(
         row["is_private"] = (
             "true" if private is True else "false" if private is False else None
         )
+    if followup:
+        row.update(csv_values(issue))
     return {key: csv_safe(value) for key, value in row.items()}
 
 
@@ -105,11 +112,14 @@ def write_outputs(result: ExportResult, output_dir: Path) -> tuple[Path, Path]:
         extended = result.metadata.get("field_profile") == "extended"
         if extended:
             columns += list(EXTENDED_CSV_COLUMNS)
+        followup = "followup" in result.metadata
+        if followup:
+            columns += list(FOLLOWUP_CSV_COLUMNS)
         with staged_csv.open("w", encoding="utf-8-sig", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=columns)
             writer.writeheader()
             writer.writerows(
-                _csv_row(issue, include_jst_columns, extended)
+                _csv_row(issue, include_jst_columns, extended, followup)
                 for issue in result.issues
             )
         with staged_json.open("w", encoding="utf-8") as stream:

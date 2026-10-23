@@ -10,7 +10,9 @@ param(
     [switch] $IncludeSubprojects,
     [switch] $IncludeJstColumns,
     [string] $Status = '*',
-    [string] $Tracker
+    [string] $Tracker,
+    [string] $FollowupConfig,
+    [string] $AsOf
 )
 
 # Binding validation is deliberately inside the safe error boundary below.

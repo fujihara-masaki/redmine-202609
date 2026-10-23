@@ -13,6 +13,8 @@ build/
 !.env.example
 config.toml
 config.local.toml
+followup*.toml
+!followup-rules.example.toml
 *.pem
 *.key
 output/

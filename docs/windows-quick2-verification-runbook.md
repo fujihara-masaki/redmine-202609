@@ -292,7 +292,22 @@ $data.metadata.extended_field_availability.PSObject.Properties | ForEach-Object 
 過去の固定件数を無条件の期待値にせず、比較時刻と検索条件を確認する。利用者の既存CLIの
 extended成功報告と、今回wrapperの未実施の実機確認は区別する。
 
-## 10. 終了・情報管理
+## 10. PR-2フォロー判定の手動受入
+
+更新後は既存venvで上記のpytest、Ruff、format、compileと
+`& .\tests\windows\launcher.Tests.ps1` を実行する。失敗時は実機へ進まない。
+実カスタム項目ID2つ、完了ID、APIの区分値をローカルルールへ設定し、GUIの**発見日**
+（障害を検知・発見した日付）・障害区分・現在状態を照合する。
+90/180日ちょうどの未完了は〇、完了は発見日欠損でも対象外、未完了の未知区分・不正入力は判定不能。
+日数到達基準と月次判定を混同せず、〇を期限違反・承認不備・状態変更可否として扱わない。
+
+Inherit/System、別cwd、日本語・空白を含む相対/絶対ルールパスと環境変数復元を確認する。
+全件保存・CSV/JSON件数整合・固定基準日を今回のrunだけで照合する。
+実行例、schema、ローカル設定方法と受入チェックは[followup.md](followup.md)を使用する。
+実装とLinux HTTPモック試験、Windows Desktop 5.1ハーネス、QUICK2実機受入を別々に記録し、
+実データ・実設定・画面・応答をpublic repositoryへ貼らない。フォローの実機受入は未実施。
+
+## 11. 終了・情報管理
 
 APIキーはファイルへ保存せず、環境変数を一時利用した場合は削除する。exportはrepository外の
 承認済み・アクセス制御済みの場所だけに置き、実データ、スクリーンショット、一時検証scriptを

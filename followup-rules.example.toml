@@ -1,0 +1,15 @@
+# Fictional IDs only. Configure actual IDs and exact API category values locally.
+schema_version = 1
+
+[fields]
+incident_type_custom_field_id = 101
+discovered_on_custom_field_id = 102
+
+[statuses]
+completed_ids = [5]
+
+[threshold_days]
+"非影響" = 90
+"軽障害" = 90
+"中障害" = 180
+"重障害" = 180
