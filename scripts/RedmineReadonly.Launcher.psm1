@@ -165,14 +165,14 @@ function Invoke-ReadonlyLauncher {
         $o = @{ ProxyMode = 'Inherit'; Fields = 'basic'; Status = '*' }
         foreach ($key in $Options.Keys) {
             if ($key -notin @('Command', 'ProxyMode', 'ConfigPath', 'Project', 'OutputDir',
-                'Fields', 'IncludeSubprojects', 'IncludeJstColumns', 'Status', 'Tracker')) { throw 'input' }
+                'Fields', 'IncludeSubprojects', 'IncludeJstColumns', 'Status', 'Tracker', 'FollowupConfig', 'AsOf')) { throw 'input' }
             $o[$key] = $Options[$key]
         }
         if (-not $o.ContainsKey('Command') -or
             $o.Command -cnotin @('check', 'resolve-project', 'export') -or
             $o.ProxyMode -cnotin @('Inherit', 'System') -or
             $o.Fields -cnotin @('basic', 'extended')) { throw 'input' }
-        $exportOnly = @('OutputDir', 'Fields', 'IncludeSubprojects', 'IncludeJstColumns', 'Status', 'Tracker')
+        $exportOnly = @('OutputDir', 'Fields', 'IncludeSubprojects', 'IncludeJstColumns', 'Status', 'Tracker', 'FollowupConfig', 'AsOf')
         if ($o.Command -ne 'export') {
             foreach ($key in $exportOnly) { if ($Options.ContainsKey($key)) { throw 'input' } }
         }
@@ -201,6 +201,21 @@ function Invoke-ReadonlyLauncher {
             }
             if ($o.ContainsKey('IncludeSubprojects') -and $o.IncludeSubprojects) { $cliArgs += '--include-subprojects' }
             if ($o.ContainsKey('IncludeJstColumns') -and $o.IncludeJstColumns) { $cliArgs += '--include-jst-columns' }
+            if ($o.ContainsKey('AsOf') -and -not $o.ContainsKey('FollowupConfig')) { throw 'input' }
+            if ($o.ContainsKey('FollowupConfig')) {
+                if ($o.Status -cne '*') { throw 'input' }
+                $followup = Resolve-ReadonlyPath $o.FollowupConfig $Root
+                if (-not (Test-Path -LiteralPath $followup -PathType Leaf)) { throw 'input' }
+                $cliArgs += @('--followup-config', $followup)
+                if ($o.ContainsKey('AsOf')) {
+                    $day = [DateTime]::MinValue
+                    if ($o.AsOf -cnotmatch '\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z' -or
+                        -not [DateTime]::TryParseExact($o.AsOf, 'yyyy-MM-dd',
+                            [Globalization.CultureInfo]::InvariantCulture,
+                            [Globalization.DateTimeStyles]::None, [ref] $day)) { throw 'input' }
+                    $cliArgs += @('--as-of', $o.AsOf)
+                }
+            }
         }
         if ($o.Command -eq 'export') {
             $classification = 'output-path'

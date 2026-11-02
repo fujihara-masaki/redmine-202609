@@ -105,6 +105,49 @@ try {
             Assert-True ((State).args[4] -eq (Join-Path $fixture 'config.toml'))
         } finally { Set-Location -LiteralPath $before.Path }
     }
+    Test-Case 'followup fixed arguments use repository from different cwd' {
+        $rules = Join-Path $fixture '架空 rules (sample).toml'
+        Set-Content -LiteralPath $rules -Value 'placeholder'
+        $before = Get-Location
+        try {
+            Set-Location -LiteralPath $temporary
+            Assert-True ((Launch @{Command='export'; Project='42'; OutputDir='C:\Exports';
+                FollowupConfig='架空 rules (sample).toml'; AsOf='2026-10-23';
+                Fields='extended'; IncludeJstColumns=$true}) -eq 0)
+            $actual = (State).args
+            Assert-True ($actual[-4] -ceq '--followup-config' -and $actual[-3] -ceq $rules)
+            Assert-True ($actual[-2] -ceq '--as-of' -and $actual[-1] -ceq '2026-10-23')
+            Assert-True ((Get-Location).Path -eq $temporary)
+        } finally { Set-Location -LiteralPath $before.Path }
+    }
+    foreach ($mode in @('Inherit', 'System')) {
+        Test-Case ('followup absolute path and default date in ' + $mode) {
+            $rules = Join-Path $fixture '架空 rules (sample).toml'
+            Assert-True ((Launch @{Command='export'; Project='42'; OutputDir='C:\Exports';
+                ProxyMode=$mode; FollowupConfig=$rules}) -eq 0)
+            Assert-True ((State).args[-1] -ceq $rules)
+            Assert-True ((State).args -notcontains '--as-of')
+            if ($mode -eq 'System') { Assert-True ((State).restore -eq 1) }
+        }
+    }
+    foreach ($bad in @(
+        @{Command='check'; FollowupConfig='rules.toml'},
+        @{Command='resolve-project'; Project='42'; AsOf='2026-10-23'},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; AsOf='2026-10-23'},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; FollowupConfig=''},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; FollowupConfig='missing.toml'},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; FollowupConfig='架空 rules (sample).toml'; Status='open'},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; FollowupConfig='架空 rules (sample).toml'; AsOf='2026-02-30'},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; FollowupConfig='架空 rules (sample).toml'; AsOf='20261023'},
+        @{Command='export'; Project='42'; OutputDir='C:\Exports'; FollowupConfig='架空 rules (sample).toml'; AsOf='2026-10-23 --status=5'}
+    )) {
+        Test-Case 'invalid followup stops before helper PAC environment and CLI' {
+            $bad.ProxyMode = 'System'
+            Assert-True ((Launch $bad) -eq 3)
+            $s = State
+            Assert-True ($s.helper -eq 0 -and $s.pac -eq 0 -and $s.cli -eq 0 -and $s.restore -eq 0)
+        }
+    }
     foreach ($kind in @('check', 'export', 'resolve-project')) {
         Test-Case ('System PROXY uses target for ' + $kind) {
             $s = State
@@ -596,13 +639,18 @@ public static class LauncherTestShortPath {
         Set-Content -LiteralPath $config -Value 'base_url="https://redmine.example.invalid/redmine"' -Encoding UTF8
         # Windows PS UTF8 writes BOM; TOML fixture must be UTF8 without BOM.
         [IO.File]::WriteAllText($config, 'base_url="https://redmine.example.invalid/redmine"', (New-Object Text.UTF8Encoding($false)))
+        Copy-Item -LiteralPath (Join-Path $repo 'followup-rules.example.toml') -Destination (Join-Path $integration '架空 rules (sample).toml')
         $cli = @'
 import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
 assert args[0] == '--config'
 assert Path(args[1]).name == '設定 (sample).toml'
-assert args[2:] == ['export', '--project', '42', '--output-dir', os.environ['TEST_OUTPUT'], '--fields', 'extended', '--status=*', '--tracker', '2', '--include-subprojects', '--include-jst-columns']
+assert args[2:-4] == ['export', '--project', '42', '--output-dir', os.environ['TEST_OUTPUT'], '--fields', 'extended', '--status=*', '--tracker', '2', '--include-subprojects', '--include-jst-columns']
+assert args[-4] == '--followup-config'
+assert Path(args[-3]).is_absolute() and Path(args[-3]).name == '架空 rules (sample).toml'
+assert Path(args[-3]).parent == Path(args[1]).parent
+assert args[-2:] == ['--as-of', '2026-10-23']
 assert os.environ.get('HTTPS_PROXY') == 'http://chosen.example.invalid:8080'
 assert os.environ.get('NO_PROXY') == 'localhost'
 assert os.environ.get('REQUESTS_CA_BUNDLE') == 'fictional-ca.pem'
@@ -635,7 +683,7 @@ $env:REQUESTS_CA_BUNDLE = 'fictional-ca.pem'
 $env:TEST_OUTPUT = $Output.TrimEnd('\')
 $env:REDMINE_API_KEY = 'FAKE-SECRET-KEY'
 $initialLocation = (Get-Location).Path
-$options = @{ Command='export'; ProxyMode='System'; ConfigPath='設定 (sample).toml'; Project='42'; OutputDir=$Output; Fields='extended'; Status='*'; Tracker=2; IncludeSubprojects=$true; IncludeJstColumns=$true }
+$options = @{ Command='export'; ProxyMode='System'; ConfigPath='設定 (sample).toml'; Project='42'; OutputDir=$Output; Fields='extended'; Status='*'; Tracker=2; IncludeSubprojects=$true; IncludeJstColumns=$true; FollowupConfig='架空 rules (sample).toml'; AsOf='2026-10-23' }
 & (Join-Path $Repo 'scripts\Invoke-RedmineReadonly.ps1') @options
 $code = $LASTEXITCODE
 if ($env:TEST_SNAPSHOT -eq 'absent') {

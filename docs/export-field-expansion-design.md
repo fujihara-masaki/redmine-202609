@@ -57,6 +57,12 @@ project別可視性、GUIとの業務対応は未確認である。マージ後�
 
 ## 後続段階
 
-description、custom_fields、本文、個別issue情報はPR-1.2に含めない。custom fieldsは対象環境ごとのID、
-型、複数値、可視性、機密区分を確認して別の許可リストPRとする。journals、relations、attachments、
+description、custom_fields、本文、個別issue情報はPR-1.2に含めない。PR-2第一段階では、明示
+followup-configの指定時だけ、設定した障害区分・発見日の2カスタム項目をIDで限定選択する。
+未知項目・付随キー・配列/object全体は保存せず、入力状態と派生結果を分離する。
+単一文字列を初版とし、完了優先の暦日判定、固定CSV9列、JSON schema v1、rules/input SHA-256を
+[フォロー設計](followup.md)に定義する。既定basic/extendedには追加せず、既存JST列とも独立する。
+発見日は検知・発見の日付で、90/180日到達の未完了を〇とする。月次・延長・承認評価は後続。
+実ID、区分値、型、可視性、機密区分はQUICK2手動受入でローカル確認する。
+一般的な変更候補、二者レビュー、再取得差分検証も後続計画に残す。journals、relations、attachments、
 watchers等の新endpoint/includeも負荷・権限を別レビューし、汎用path/methodや全項目探索は導入しない。

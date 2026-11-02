@@ -91,7 +91,41 @@ valueは「非nullで検証に合格した応答」であり、業務上設定�
 返らない値の原因を推測・補完せず、0件から対象環境の対応有無を判断しません。
 
 この切替は `/issues.json` の検索条件、呼出回数、includeを変更しません。API応答自体には保存対象外の
-情報が含まれ得ます。description、custom_fields、journals等、個別issue取得は引き続き対象外です。
+情報が含まれ得ます。description、journals等、個別issue取得は引き続き対象外です。
+カスタム項目は、次のフォロー指定時だけ設定した2項目を限定選択します。
+
+### PR-2: フォロー判定・ローカルレビュー出力
+
+`export --followup-config followup-rules.toml` を明示した場合だけ、障害区分と**発見日**から
+全行を判定します。発見日は障害を検知・発見した日付で、created_on等で代用しません。
+「〇」は設定日数以上が発見日から経過し、現在未完了の意味です。非影響・軽障害90日、
+中障害・重障害180日が初期例で、90/180日ちょうどから対象です。
+期限違反、承認不備、完了への変更可否は判定しません。月次判定とは異なる暦日の日数判定です。
+
+接続configと別の `followup-rules.example.toml` を `followup-rules.toml` にコピーし、
+実フィールドID2つ、完了ID、APIの正確な区分値をローカル設定します。101、102、5は仮のIDです。
+実ルールはGit対象外の `followup*.toml` またはrepository外へ置きます。
+`--as-of YYYY-MM-DD` はフォロー指定時だけ使用でき、省略時は実行開始時のJST当日で固定します。
+過去基準日も取得した現在状態についての計算で、過去の状態復元ではありません。
+フォロー指定時のstatusは `*` のみ。basic/extended、JST列、tracker/子project指定と併用できます。
+
+```powershell
+.\.venv\Scripts\redmine-readonly.exe --config config.toml export `
+  --project 123 --output-dir 'C:\ApprovedData\RedmineExports' `
+  --followup-config followup-rules.toml --as-of 2026-10-23
+
+& .\scripts\Invoke-RedmineReadonly.ps1 -Command export -ProxyMode Inherit `
+  -Project '123' -OutputDir 'C:\ApprovedData\RedmineExports' `
+  -FollowupConfig 'followup-rules.toml' -AsOf '2026-10-23'
+if ($LASTEXITCODE -ne 0) { throw 'export failed; stop before inspection' }
+```
+
+上は架空値です。Pythonの相対ルールパスはcwd基準、Windows起動補助はrepository基準です。
+全行を同じCSV/JSONへ保存し、対象外・判定不能も落としません。判定不能があっても正常保存なら終了0、
+完了表示に全3件数を表示します。設定・取得・保存失敗は終了2、完成runへの一括公開は従来どおりです。
+完了行は発見日欠損でも対象外を優先し、未完了の未定義区分や不正入力は理由付き判定不能です。
+入力と派生結果、固定CSV9列、ハッシュ仕様、優先順位と手動受入は
+[フォローschema・受入手順](docs/followup.md)を参照してください。
 
 ページングでは `limit`, `offset`, `total_count` を検査し、サーバーが要求より少ないページを返しても実返却数で進めます。重複ID、件数変化、早すぎる空ページ、offset不一致、途中失敗、上限到達時は完成出力を書きません。ただし件数一致は取得中の同時更新を含むトランザクション的な完全スナップショットを保証しません。
 
@@ -99,7 +133,11 @@ valueは「非nullで検証に合格した応答」であり、業務上設定�
 
 標準Redmine REST APIのうち、「安全上の境界」に列挙した3種類のGETエンドポイントと、issuesのフィルター・ページングを前提にしています。一方、対象環境のバージョンや改修により、利用可否、フィルター構文、上限、返却項目、権限挙動が異なる可能性があります。`docs/quick2-verification-checklist.md` に従い確認してください。
 
-標準10項目以外（カスタム項目や本文）は現在も設計・後続PRの範囲です。管理者と必要性を合意し、安全な検証から型や可視性を確認してください。段階案は [export項目の拡張設計](docs/export-field-expansion-design.md) を参照してください。利用者から既存CLIの手動プロキシ指定でextended取得・GUI照合成功の報告があります。今回の起動補助によるQUICK2実機確認は未実施で、取得完了とGUI上の業務的妥当性は別に確認します。
+標準10項目とフォロー用2項目以外のカスタム項目や本文は後続範囲です。段階案は
+[export項目の拡張設計](docs/export-field-expansion-design.md)を参照してください。
+利用者から既存CLIの手動プロキシ指定でextended取得・GUI照合成功の報告があります。
+フォローの実ID・実区分値・QUICK2実機受入は未確認です。実装とHTTPモック試験の完了は、
+実機受入合格を意味しません。GUI照合は利用者がローカルで実施します。
 
 ## 開発
 

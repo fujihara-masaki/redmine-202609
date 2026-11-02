@@ -11,6 +11,7 @@ from .config import load_config
 from .errors import AppError
 from .exporter import fetch_issues
 from .fields import FIELD_PROFILES
+from .followup import prepare_followup
 from .output import write_outputs
 
 
@@ -58,6 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="add JST display columns while retaining raw API timestamps",
     )
     export.add_argument("--output-dir", type=Path, required=True)
+    export.add_argument(
+        "--followup-config", type=Path, help="enable local follow-up using rule TOML"
+    )
+    export.add_argument(
+        "--as-of", help="follow-up calendar date YYYY-MM-DD (default: today in JST)"
+    )
     return parser
 
 
@@ -73,6 +80,11 @@ def _api_key() -> str:
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        rules, as_of = (None, None)
+        if args.command == "export":
+            rules, as_of = prepare_followup(
+                args.followup_config, args.as_of, args.status
+            )
         client = RedmineClient(load_config(args.config), _api_key())
         if args.command == "check":
             user = client.current_user()
@@ -93,9 +105,16 @@ def run(argv: list[str] | None = None) -> int:
                 status_id=args.status,
                 include_jst_columns=args.include_jst_columns,
                 field_profile=args.fields,
+                followup_rules=rules,
+                as_of=as_of,
             )
             csv_path, json_path = write_outputs(result, args.output_dir)
             print(f"OK: exported {len(result.issues)} issues")
+            if rules is not None:
+                counts = result.metadata["followup"]["counts"]
+                print(
+                    f"Follow-up: target={counts['target']}, not_target={counts['not_target']}, indeterminate={counts['indeterminate']}"
+                )
             print(f"CSV: {csv_path}")
             print(f"JSON: {json_path}")
         return 0

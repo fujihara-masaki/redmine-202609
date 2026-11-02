@@ -8,6 +8,7 @@ from typing import Any
 from .client import RedmineClient
 from .errors import AppError
 from .fields import EXTENDED_FIELDS, EXTENDED_NAME_MAX_LENGTH, FIELD_PROFILES
+from .followup import FollowupRules, apply_followup, current_jst_date, select_inputs
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,15 @@ def fetch_issues(
     status_id: str = "*",
     include_jst_columns: bool = False,
     field_profile: str = "basic",
+    followup_rules: FollowupRules | None = None,
+    as_of: date | None = None,
 ) -> ExportResult:
+    if followup_rules is None and as_of is not None:
+        raise AppError("as-of requires followup rules")
+    if followup_rules is not None:
+        if status_id != "*":
+            raise AppError("followup requires status '*'")
+        as_of = as_of if as_of is not None else current_jst_date()
     if field_profile not in FIELD_PROFILES:
         raise AppError("field profile must be 'basic' or 'extended'")
     if not project_id.strip():
@@ -96,6 +105,8 @@ def fetch_issues(
             selected = select_fields(
                 issue, include_jst_columns, field_profile=field_profile
             )
+            if followup_rules is not None:
+                selected["followup_inputs"] = select_inputs(issue, followup_rules)
             selected_issues.append(selected)
             if field_profile == "extended":
                 for field in EXTENDED_FIELDS:
@@ -138,6 +149,8 @@ def fetch_issues(
             selected_extended_fields=list(EXTENDED_FIELDS),
             extended_field_availability=availability,
         )
+    if followup_rules is not None:
+        metadata["followup"] = apply_followup(selected_issues, followup_rules, as_of)
     return ExportResult(selected_issues, metadata)
 
 

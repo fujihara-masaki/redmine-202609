@@ -14,6 +14,8 @@ pip install、テスト、venv activation、config作成を実行しない。
 wrapperは自分の配置場所からrepositoryを確定し、そこの `.venv\Scripts\python.exe` と
 `config.toml` を使う。カレントディレクトリの別venv/configやグローバルPythonへは切り替えない。
 明示した `ConfigPath` の相対パスもrepository基準。絶対パスも使用できる。
+フォローの `FollowupConfig` も同じrepository基準で、別cwdからも固定のルールパスを使用する。
+Python CLIを直接呼ぶ場合の相対パスはcwd基準なので区別する。
 カレントディレクトリは変更しない。`OutputDir` は空でない絶対パスでrepository外を指定する。
 repositoryと同一・子孫への出力は、ドライブ／UNC共有のルートを含めて拒否する。
 exportでは文字列正規化に加え、Windowsのディレクトリハンドルから正規化した参照先を取得して
@@ -90,9 +92,16 @@ if ($exportExit -ne 0) {
 
 `Command` はcheck / resolve-project / export、`ProxyMode` はInherit / System、
 `Fields` はbasic / extended（既定basic）。Projectは後二者で必須、OutputDirはexportで必須。
-Fields、OutputDir、Status、Tracker、二つのIncludeスイッチはexportだけで使う。
+Fields、OutputDir、Status、Tracker、二つのIncludeスイッチ、FollowupConfig、AsOfはexportだけで使う。
 Statusは既定 `*`、Trackerは省略可能な正整数。checkへProject、他コマンドへexport専用引数を
 明示すると停止する。APIキー、URL、PAC、プロキシURI、任意実行先・任意CLI引数のパラメータはない。
+
+`-FollowupConfig 'followup-rules.toml'` を指定した場合だけフォローを有効化し、`-AsOf '2026-10-23'`
+で任意の基準日を渡す。AsOf単独、不正日付、フォローとStatusの `*` 以外は事前停止する。
+ルールTOML内容はPython CLIが認証・通信前に一度だけ読み込み検証する。省略時のJST基準日は
+CLI開始時に固定する。Inherit/Systemの照合・一時設定・復元・cleanup失敗時の契約は従来どおり。
+発見日・区分・現在状態の手動受入、Windows実行例、〇の意味は[フォロー手順](followup.md)を参照する。
+今回のフォロー対応についてDesktop 5.1/実QUICK2確認は別途実施し、過去のwrapper確認記録を流用しない。
 
 ## 判定・競合・終了コード
 
